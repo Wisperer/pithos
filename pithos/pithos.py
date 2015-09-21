@@ -199,7 +199,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
         sink_bin.add_pad(Gst.GhostPad.new("sink", split.get_static_pad("sink")))
 
-        self.player.set_property("audio-sink", sink_bin)
+        self.player.set_property("audio-sink", sink_bin) # comment out this line to switch back to not saving the stream
 
         qrep = Gst.ElementFactory.make("queue")
         rep = Gst.ElementFactory.make("autoaudiosink")
@@ -218,6 +218,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         #mux = Gst.ElementFactory.make("oggmux")
         self.fs = Gst.ElementFactory.make("filesink")
         self.fs.set_property("location", "test.file") #dummy location
+        self.fs.set_property("async",False)
+
         sink_bin.add(qfs)
         sink_bin.add(enc)
         sink_bin.add(self.tag)
@@ -267,6 +269,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         aa = GdkPixbuf.Pixbuf.new_from_file(get_media_file('album'))
 
         self.default_album_art = aa.scale_simple(ALBUM_ART_SIZE, ALBUM_ART_SIZE, GdkPixbuf.InterpType.BILINEAR)
+
+        #self.playlog=open("%s/playlog" % self.preferences['save_to'],"a")
 
     def init_ui(self):
         GLib.set_application_name("Pithos")
@@ -559,17 +563,18 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.player_status.reset()
 
         # split save to a file
-        # self.buffer_percent = 100
+        #self.buffer_percent = 100
         # set output file
-        self.fs.set_property("location", "%s/%s - %s (partial).mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title))
+        self.outfolder="%s/%s" % (self.preferences['save_to'],self.current_station.name)
+        if not os.path.exists(self.outfolder):
+            os.makedirs(self.outfolder)
+        self.fs.set_property("location", "%s/%s - %s (partial).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
         # set tags
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
         #self.tag.gst_tag_setter_add_tag_values("title")
         # append log
-        f=open("%s/playlog" % self.preferences['save_to'],"a")
-        f.write("%s: %s - %s%s\n" % (self.current_station.name,self.current_song.artist, self.current_song.title," (Loved)" if self.current_song.rating == RATE_LOVE else "")) # `,RATE_BAN
-        f.close()
+        # self.playlog.write("\n%s: %s - %s" % (self.current_station.name,self.current_song.artist, self.current_song.title))
 
         self.player.set_property("uri", self.current_song.audioUrl)
         self.player.set_state(Gst.State.PAUSED)
@@ -768,9 +773,15 @@ class PithosWindow(Gtk.ApplicationWindow):
     def on_gst_eos(self, bus, message):
         logging.info("EOS")
         # move the partial into completed
-        fnamepartial="%s/%s - %s (partial).mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title)
-        fnamefull="%s/%s - %s.mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title)
-        os.rename(fnamepartial,fnamefull)
+        if self.current_song.rating == RATE_LOVE:
+            self.playlog.write("(loved)")
+            fnamefull="%s/%s - %s (loved).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title)
+            os.rename(self.fs.get_property("location"),fnamefull)
+        elif self.current_song.rating == RATE_BAN:
+            os.remove(self.fs.get_property("location"))    # kill that awefull song
+        else:
+            fnamefull="%s/%s - %s.mp3" % (self.outfolder,self.current_song.artist, self.current_song.title)
+            os.rename(self.fs.get_property("location"),fnamefull)
 
         self.next_song()
 
@@ -1157,6 +1168,7 @@ class PithosWindow(Gtk.ApplicationWindow):
     def on_destroy(self, widget, data=None):
         """on_destroy - called when the PithosWindow is close. """
         self.stop()
+        #self.playlog.close()
         self.preferences['last_station_id'] = self.current_station_id
         self.prefs_dlg.save()
         self.quit()
