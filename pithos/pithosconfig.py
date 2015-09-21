@@ -19,7 +19,7 @@
 __pithos_data_directory__ = 'data/'
 __license__ = 'GPL-3'
 
-VERSION = '1.1.1'
+VERSION = '1.1.1x'
 
 import os
 
@@ -45,14 +45,14 @@ def get_media_file(name):
     media = os.path.join(getdatapath(), 'media', media_files[name])
     if not os.path.exists(media):
         media = None
-        
+
     return media
 
 def get_ui_file(name):
     ui_filename = os.path.join(getdatapath(), 'ui', ui_files[name])
     if not os.path.exists(ui_filename):
         ui_filename = None
-        
+
     return ui_filename
 
 def get_data_file(*path_segments):

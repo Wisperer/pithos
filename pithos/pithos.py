@@ -188,7 +188,48 @@ class PithosWindow(Gtk.ApplicationWindow):
         Gst.init(None)
         self._query_duration = Gst.Query.new_duration(Gst.Format.TIME)
         self._query_position = Gst.Query.new_position(Gst.Format.TIME)
-        self.player = Gst.ElementFactory.make("playbin", "player");
+        self.player = Gst.ElementFactory.make("playbin", "player")
+
+        # split the stream out for saving
+        # https://wiki.ubuntu.com/Novacut/GStreamer1.0#Examples
+        split = Gst.ElementFactory.make("tee")
+
+        sink_bin = Gst.Bin()
+        sink_bin.add(split)
+
+        sink_bin.add_pad(Gst.GhostPad.new("sink", split.get_static_pad("sink")))
+
+        self.player.set_property("audio-sink", sink_bin)
+
+        qrep = Gst.ElementFactory.make("queue")
+        rep = Gst.ElementFactory.make("autoaudiosink")
+        sink_bin.add(qrep)
+        sink_bin.add(rep)
+        split.link(qrep)
+        qrep.link(rep)
+
+        # http://gstreamer.freedesktop.org/documentation/plugins.html
+        qfs = Gst.ElementFactory.make("queue")
+        enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        self.tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+        # for ogg vorbis do
+        #enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        #tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+        #mux = Gst.ElementFactory.make("oggmux")
+        self.fs = Gst.ElementFactory.make("filesink")
+        self.fs.set_property("location", "test.file") #dummy location
+        sink_bin.add(qfs)
+        sink_bin.add(enc)
+        sink_bin.add(self.tag)
+        #sink_bin.add(mux)
+        sink_bin.add(self.fs)
+        split.link(qfs)
+        qfs.link(enc)
+        enc.link(self.tag)
+        # for ogg vorbis extend the chain
+        #self.tag.link(mux)
+        #mux.link(self.fs)
+        self.tag.link(self.fs)
 
         bus = self.player.get_bus()
         bus.add_signal_watch()
@@ -517,6 +558,19 @@ class PithosWindow(Gtk.ApplicationWindow):
         logging.info("Starting song: index = %i"%(song_index))
         self.player_status.reset()
 
+        # split save to a file
+        # self.buffer_percent = 100
+        # set output file
+        self.fs.set_property("location", "%s/%s - %s (partial).mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title))
+        # set tags
+        # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
+        #self.tag.gst_tag_setter_add_tag_values("artist")
+        #self.tag.gst_tag_setter_add_tag_values("title")
+        # append log
+        f=open("%s/playlog" % self.preferences['save_to'],"a")
+        f.write("%s: %s - %s%s\n" % (self.current_station.name,self.current_song.artist, self.current_song.title," (Loved)" if self.current_song.rating == RATE_LOVE else "")) # `,RATE_BAN
+        f.close()
+
         self.player.set_property("uri", self.current_song.audioUrl)
         self.player.set_state(Gst.State.PAUSED)
         self.playcount += 1
@@ -713,6 +767,11 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def on_gst_eos(self, bus, message):
         logging.info("EOS")
+        # move the partial into completed
+        fnamepartial="%s/%s - %s (partial).mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title)
+        fnamefull="%s/%s - %s.mp3" % (self.preferences['save_to'],self.current_song.artist, self.current_song.title)
+        os.rename(fnamepartial,fnamefull)
+
         self.next_song()
 
     def on_gst_plugin_installed(self, result, userdata):
@@ -1114,4 +1173,3 @@ def NewPithosWindow(app, options):
     window.set_application(app)
     window.finish_initializing(builder, options, app)
     return window
-
