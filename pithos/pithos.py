@@ -270,8 +270,6 @@ class PithosWindow(Gtk.ApplicationWindow):
 
         self.default_album_art = aa.scale_simple(ALBUM_ART_SIZE, ALBUM_ART_SIZE, GdkPixbuf.InterpType.BILINEAR)
 
-        #self.playlog=open("%s/playlog" % self.preferences['save_to'],"a")
-
     def init_ui(self):
         GLib.set_application_name("Pithos")
         Gtk.Window.set_default_icon_name('pithos')
@@ -568,13 +566,11 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.outfolder="%s/%s" % (self.preferences['save_to'],self.current_station.name)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
-        self.fs.set_property("location", "%s/%s - %s (partial).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
+        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,self.current_song.artist, self.current_song.title))
         # set tags
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
         #self.tag.gst_tag_setter_add_tag_values("title")
-        # append log
-        # self.playlog.write("\n%s: %s - %s" % (self.current_station.name,self.current_song.artist, self.current_song.title))
 
         self.player.set_property("uri", self.current_song.audioUrl)
         self.player.set_state(Gst.State.PAUSED)
@@ -588,6 +584,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.emit('song-changed', self.current_song)
 
     def next_song(self, *ignore):
+        if self.fs.get_property("location") is not None and os.path.isfile(self.fs.get_property("location")):
+            os.remove(self.fs.get_property("location"))    # remove the partial file
         self.start_song(self.current_song_index + 1)
 
     def user_play(self, *ignore):
@@ -617,6 +615,8 @@ class PithosWindow(Gtk.ApplicationWindow):
 
 
     def stop(self):
+        if self.fs.get_property("location") is not None and os.path.isfile(self.fs.get_property("location")):
+            os.remove(self.fs.get_property("location"))    # remove the partial file on station switch, app exit etc which causes the song to "stop" midstream
         prev = self.current_song
         if prev and prev.start_time:
             prev.finished = True
@@ -774,14 +774,9 @@ class PithosWindow(Gtk.ApplicationWindow):
         logging.info("EOS")
         # move the partial into completed
         if self.current_song.rating == RATE_LOVE:
-            self.playlog.write("(loved)")
-            fnamefull="%s/%s - %s (loved).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title)
-            os.rename(self.fs.get_property("location"),fnamefull)
-        elif self.current_song.rating == RATE_BAN:
-            os.remove(self.fs.get_property("location"))    # kill that awefull song
+            os.rename(self.fs.get_property("location"),"%s/%s - %s (loved).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
         else:
-            fnamefull="%s/%s - %s.mp3" % (self.outfolder,self.current_song.artist, self.current_song.title)
-            os.rename(self.fs.get_property("location"),fnamefull)
+            os.rename(self.fs.get_property("location"),"%s/%s - %s.mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
 
         self.next_song()
 
@@ -1168,7 +1163,6 @@ class PithosWindow(Gtk.ApplicationWindow):
     def on_destroy(self, widget, data=None):
         """on_destroy - called when the PithosWindow is close. """
         self.stop()
-        #self.playlog.close()
         self.preferences['last_station_id'] = self.current_station_id
         self.prefs_dlg.save()
         self.quit()
