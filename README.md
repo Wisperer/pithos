@@ -2,16 +2,19 @@ Pithosfly
 ------
 
 A fork for Pithos, a native Pandora Radio client for Linux, that saves the stream you are listening to disk.
-It downloads, rips music intelligently, saving songs into mp3 files int individual folders, named after the radio stream.
+It downloads, rips music intelligently, saving songs into mp3 files into individual folders, named after a radio stream.
 
 Configure folder to save to by adding the following to pithos.ini (usually found in ~/.config/):
 `save_to=/path/to/folder`
 
 Run:
+
 `cd /folder/with/source`
+
 `python3 -m pithos`
 
 Or to see verbose output run
+
 `python3 -m pithos -v`
 
 You can also build and install per Pithos' own instructions:
@@ -24,7 +27,7 @@ sudo apt-get install python3-setuptools python3-dbus python3-gi python3-gi-cairo
   python3-pylast gir1.2-appindicator3-0.1 gir1.2-notify-0.7 gir1.2-keybinder-3.0 gnome-icon-theme-symbolic
 sudo ./setup.py install
 ```
-(you might need some more libs for the latest pithos). More details [here](https://github.com/pithos/pithos/wiki/Installing-from-Source)
+(you might need some more libs for the latest pithos). More details [here](https://github.com/pithos/pithos/wiki/Installing-from-Source).
 
 The original Pithos [homepage is here](http://pithos.github.io).
 
