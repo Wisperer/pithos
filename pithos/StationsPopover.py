@@ -29,14 +29,15 @@ class StationsPopover(Gtk.Popover):
         box2 = Gtk.Box()
         self.search = Gtk.SearchEntry()
         self.sorted = False
-        sort = Gtk.ToggleButton.new()
-        sort.add(Gtk.Image.new_from_icon_name("view-sort-ascending-symbolic", Gtk.IconSize.BUTTON))
-        sort.connect("toggled", self.sort_changed)
+        self.sort = Gtk.ToggleButton.new()
+        self.sort.add(Gtk.Image.new_from_icon_name("view-sort-ascending-symbolic", Gtk.IconSize.BUTTON))
+        self.sort.connect("toggled", self.sort_changed)
         box2.pack_start(self.search, True, True, 0)
-        box2.add(sort)
+        box2.add(self.sort)
 
         self.listbox = Gtk.ListBox()
         self.listbox.connect('button-press-event', self.on_button_press)
+        self.listbox.connect('row-activated', self.on_row_activated)
         self.listbox.set_sort_func(self.listbox_sort)
         self.listbox.set_header_func(self.listbox_header)
         sw = Gtk.ScrolledWindow()
@@ -74,6 +75,10 @@ class StationsPopover(Gtk.Popover):
         menu.attach_to_widget(widget)
         menu.popup(None, None, None, None, event.button, event.time)
         return True
+
+    def on_row_activated(self, listbox, row):
+        self.hide()
+        self.search.set_text('')
 
     def sort_changed(self, widget):
         self.sorted = widget.get_active()

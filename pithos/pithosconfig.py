@@ -19,7 +19,7 @@
 __pithos_data_directory__ = 'data/'
 __license__ = 'GPL-3'
 
-VERSION = '1.1.1x'
+VERSION = '1.1.1.fly'
 
 import os
 

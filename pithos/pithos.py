@@ -26,6 +26,7 @@ import re
 import signal
 import sys
 import time
+import string
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -104,6 +105,12 @@ def get_album_art(url, *extra):
         loader.set_size(ALBUM_ART_SIZE, ALBUM_ART_SIZE)
         loader.write(image)
         return (loader.get_pixbuf(),) + extra
+
+def clean_name(s):
+    # for windows you can do this:
+    #valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    #return ''.join(c if c in valid_chars else '-' for c in s.strip())
+    return s.strip().replace("/","-")
 
 class PlayerStatus (object):
   def __init__(self):
@@ -322,6 +329,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.stations_popover = StationsPopover()
         self.stations_popover.set_relative_to(self.stations_button)
         self.stations_popover.set_model(self.stations_model)
+        self.stations_popover.sort.set_active(self.preferences['sort_stations'])
+        self.stations_popover.sort.connect('toggled', self.sort_toggled)
         self.stations_popover.listbox.connect('row-activated', self.active_station_changed)
         self.stations_button.set_popover(self.stations_popover)
         self.stations_label = self.builder.get_object('stationslabel')
@@ -566,7 +575,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.outfolder="%s/%s" % (self.preferences['save_to'],self.current_station.name)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
-        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,self.current_song.artist, self.current_song.title))
+        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
         # set tags
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
@@ -774,9 +783,9 @@ class PithosWindow(Gtk.ApplicationWindow):
         logging.info("EOS")
         # move the partial into completed
         if self.current_song.rating == RATE_LOVE:
-            os.rename(self.fs.get_property("location"),"%s/%s - %s (loved).mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
+            os.rename(self.fs.get_property("location"),"%s/%s - %s (loved).mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
         else:
-            os.rename(self.fs.get_property("location"),"%s/%s - %s.mp3" % (self.outfolder,self.current_song.artist, self.current_song.title))
+            os.rename(self.fs.get_property("location"),"%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
 
         self.next_song()
 
@@ -960,6 +969,9 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def active_station_changed(self, listbox, row):
         self.station_changed(row.station)
+
+    def sort_toggled(self, widget):
+        self.preferences['sort_stations'] = self.stations_popover.sorted
 
     def format_time(self, time_int):
         if time_int is None:
