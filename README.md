@@ -19,14 +19,18 @@ Or to see verbose output run
 
 You can also build and install per Pithos' own instructions:
 * Remove if already installed installed
-* Then run
-
+* Get the prerequisites
 ```
 sudo apt-get install python3-setuptools python3-dbus python3-gi python3-gi-cairo \
   gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-plugins-good gstreamer1.0-plugins-bad  \
-  python3-pylast gir1.2-appindicator3-0.1 gir1.2-notify-0.7 gir1.2-keybinder-3.0 gnome-icon-theme-symbolic
-sudo ./setup.py install
+  python3-pylast gir1.2-appindicator3-0.1 gir1.2-notify-0.7 gir1.2-keybinder-3.0 gnome-icon-theme-symbolic \
+  python3-taglib
 ```
+
+* Then run
+
+`sudo ./setup.py install`
+
 (you might need some more libs for the latest pithos). More details [here](https://github.com/pithos/pithos/wiki/Installing-from-Source).
 
 The original Pithos [homepage is here](http://pithos.github.io).

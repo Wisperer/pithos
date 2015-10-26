@@ -30,6 +30,7 @@ import string
 import urllib.error
 import urllib.parse
 import urllib.request
+import taglib
 from copy import deepcopy
 
 import gi
@@ -783,10 +784,17 @@ class PithosWindow(Gtk.ApplicationWindow):
         logging.info("EOS")
         # move the partial into completed
         if self.current_song.rating == RATE_LOVE:
-            os.rename(self.fs.get_property("location"),"%s/%s - %s (loved).mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
+            newlocation = "%s/%s - %s (loved).mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
         else:
-            os.rename(self.fs.get_property("location"),"%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
-
+            newlocation = "%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
+        os.rename(self.fs.get_property("location"),newlocation)
+        # add mp3 tags
+        f=taglib.File(newlocation)
+        f.tags["ARTIST"]=[self.current_song.artist]
+        f.tags["TITLE"]=[self.current_song.title]
+        f.tags["ALBUM"]=[self.current_song.album]
+        f.tags["GENRE"]=[self.current_station.name]
+        retval = f.save()
         self.next_song()
 
     def on_gst_plugin_installed(self, result, userdata):
