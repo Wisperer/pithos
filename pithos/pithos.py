@@ -30,7 +30,7 @@ import string
 import urllib.error
 import urllib.parse
 import urllib.request
-import taglib
+from mutagen.id3 import ID3,TRCK,TIT2,TALB,TPE1,APIC,TCON
 from copy import deepcopy
 
 import gi
@@ -57,7 +57,8 @@ try:
 except ImportError:
     pass
 
-ALBUM_ART_SIZE = 96
+ALBUM_ART_SIZE = 96     # size that's displayed
+ALBUM_ART_FULL_SIZE=300 # size that's stored in memory and saved to mp3
 ALBUM_ART_X_PAD = 6
 
 class CellRendererAlbumArt(Gtk.CellRenderer):
@@ -80,7 +81,8 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
         return (0, 0, ALBUM_ART_SIZE + ALBUM_ART_X_PAD, ALBUM_ART_SIZE)
     def do_render(self, ctx, widget, background_area, cell_area, flags):
         if self.pixbuf:
-            Gdk.cairo_set_source_pixbuf(ctx, self.pixbuf, cell_area.x, cell_area.y)
+            gui_pixbuf=self.pixbuf.scale_simple(ALBUM_ART_SIZE,ALBUM_ART_SIZE,GdkPixbuf.InterpType.BILINEAR)# scaled down pixbuf
+            Gdk.cairo_set_source_pixbuf(ctx, gui_pixbuf, cell_area.x, cell_area.y)
             ctx.paint()
         if self.icon:
             x = cell_area.x+(cell_area.width-self.rate_bg.get_width()) - ALBUM_ART_X_PAD # right
@@ -103,7 +105,7 @@ def get_album_art(url, *extra):
         return (None,) + extra
 
     with contextlib.closing(GdkPixbuf.PixbufLoader()) as loader:
-        loader.set_size(ALBUM_ART_SIZE, ALBUM_ART_SIZE)
+        loader.set_size(ALBUM_ART_FULL_SIZE, ALBUM_ART_FULL_SIZE)
         loader.write(image)
         return (loader.get_pixbuf(),) + extra
 
@@ -219,7 +221,19 @@ class PithosWindow(Gtk.ApplicationWindow):
         # http://gstreamer.freedesktop.org/documentation/plugins.html
         qfs = Gst.ElementFactory.make("queue")
         enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        # constant bit rate
+        enc.set_property("cbr", True) # constant bitrate
+        enc.set_property("target",1) # target bitrate, 0 to target quality and then bitrate does not mater
+        enc.set_property("bitrate",128) # incoming stream is 64 bit AAC+, so we upconvert to 128 to get every bit out of ut. Could user 192 or even 224 for pandora one subsribers
+        # for VBR use the following:
+        #enc.set_property("cbr",False)
+        #enc.set_property("target",0) # 0 to target quality and then bitrate does not mater
+        #enc.set_property("quality",1) # 0 to 10. 0 is the best
+        enc.set_property("encoding-engine-quality",2) # 2 high quality. 0 fast, 1 standard
+
+        # need the tagger to start the stream with an ID3 tag frame for later mutagen consumption
         self.tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+
         # for ogg vorbis do
         #enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
         #tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
@@ -276,7 +290,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
         aa = GdkPixbuf.Pixbuf.new_from_file(get_media_file('album'))
 
-        self.default_album_art = aa.scale_simple(ALBUM_ART_SIZE, ALBUM_ART_SIZE, GdkPixbuf.InterpType.BILINEAR)
+        self.default_album_art = aa.scale_simple(ALBUM_ART_FULL_SIZE, ALBUM_ART_FULL_SIZE, GdkPixbuf.InterpType.BILINEAR)
 
     def init_ui(self):
         GLib.set_application_name("Pithos")
@@ -577,7 +591,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
         self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
-        # set tags
+        # tags are set through mutagen but could use the following to set tags through gstreamer
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
         #self.tag.gst_tag_setter_add_tag_values("title")
@@ -789,12 +803,18 @@ class PithosWindow(Gtk.ApplicationWindow):
             newlocation = "%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
         os.rename(self.fs.get_property("location"),newlocation)
         # add mp3 tags
-        f=taglib.File(newlocation)
-        f.tags["ARTIST"]=[self.current_song.artist]
-        f.tags["TITLE"]=[self.current_song.title]
-        f.tags["ALBUM"]=[self.current_song.album]
-        f.tags["GENRE"]=[self.current_station.name]
-        retval = f.save()
+        f=ID3(newlocation)
+        f.add(TIT2(encoding=3, text=self.current_song.title))
+        f.add(TALB(encoding=3, text=self.current_song.album))
+        f.add(TPE1(encoding=3, text=self.current_song.artist))
+        f.add(TCON(encoding=3, text=self.current_station.name))
+        if self.current_song.art_pixbuf is not None:    # add the cover art
+            # convert pure pixelmap to jpeg through file export because python Gtk is missing buffered function implementations
+            self.current_song.art_pixbuf.savev(newlocation+".jpg", "jpeg", ["quality"], ["100"])
+            # get the file contents into the mp3 id2 tag v2.3/2.4 cover art
+            f.add(APIC(3,u"image/jpg",3,u"Cover art",open(newlocation+".jpg", 'rb').read())) # first 3 = mutagen.id3.Encoding.UTF8,  second 3 =mutagen.id3.PictureType.COVER_FRONT
+            os.remove(newlocation+".jpg")
+        f.save()
         self.next_song()
 
     def on_gst_plugin_installed(self, result, userdata):
