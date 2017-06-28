@@ -1,118 +1,76 @@
 # -*- coding: utf-8; tab-width: 4; indent-tabs-mode: nil; -*-
-### BEGIN LICENSE
 # Copyright (C) 2010-2012 Kevin Mehall <km@kevinmehall.net>
-#This program is free software: you can redistribute it and/or modify it 
-#under the terms of the GNU General Public License version 3, as published 
-#by the Free Software Foundation.
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 3, as published
+# by the Free Software Foundation.
 #
-#This program is distributed in the hope that it will be useful, but 
-#WITHOUT ANY WARRANTY; without even the implied warranties of 
-#MERCHANTABILITY, SATISFACTORY QUALITY, or FITNESS FOR A PARTICULAR 
-#PURPOSE.  See the GNU General Public License for more details.
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranties of
+# MERCHANTABILITY, SATISFACTORY QUALITY, or FITNESS FOR A PARTICULAR
+# PURPOSE.  See the GNU General Public License for more details.
 #
-#You should have received a copy of the GNU General Public License along 
-#with this program.  If not, see <http://www.gnu.org/licenses/>.
-### END LICENSE
+# You should have received a copy of the GNU General Public License along
+# with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-import sys
-import os
 import html
-from gi.repository import Gtk
-from gi.repository import GObject
+from gi.repository import GObject, Gtk
 
-from .pithosconfig import get_ui_file
+from .gi_composites import GtkTemplate
 
+
+@GtkTemplate(ui='/io/github/Pithos/ui/SearchDialog.ui')
 class SearchDialog(Gtk.Dialog):
     __gtype_name__ = "SearchDialog"
 
-    def __init__(self):
-        """__init__ - This function is typically not called directly.
-        Creation of a SearchDialog requires redeading the associated ui
-        file and parsing the ui definition extrenally, 
-        and then calling SearchDialog.finish_initializing().
-    
-        Use the convenience function NewSearchDialog to create 
-        a SearchDialog object.
-    
-        """
-        pass
+    entry = GtkTemplate.Child()
+    treeview = GtkTemplate.Child()
 
-    def finish_initializing(self, builder, worker_run):
-        """finish_initalizing should be called after parsing the ui definition
-        and creating a SearchDialog object with it in order to finish
-        initializing the start of the new SearchDialog instance.
-    
-        """
-        #get a reference to the builder and set up the signals
-        self.builder = builder
-        self.builder.connect_signals(self)
-        
-        self.entry = self.builder.get_object('entry')
-        self.treeview = self.builder.get_object('treeview')
-        self.okbtn = self.builder.get_object('okbtn')
+    def __init__(self, *args, **kwargs):
+        self.worker_run = kwargs["worker"]
+        del kwargs["worker"]
+
+        super().__init__(*args, use_header_bar=1, **kwargs)
+        self.init_template()
+
         self.model = Gtk.ListStore(GObject.TYPE_PYOBJECT, str)
         self.treeview.set_model(self.model)
-        
-        self.worker_run = worker_run
-        
+        self.query = ''
         self.result = None
 
-
-    def ok(self, widget, data=None):
-        """ok - The user has elected to save the changes.
-        Called before the dialog returns Gtk.RESONSE_OK from run().
-
-        """
-        
-
-    def cancel(self, widget, data=None):
-        """cancel - The user has elected cancel changes.
-        Called before the dialog returns Gtk.ResponseType.CANCEL for run()
-
-        """         
-        pass
-        
+    @GtkTemplate.Callback
     def search_clicked(self, widget):
         self.search(self.entry.get_text())
-        
-    def search(self, query):
-        if not query: return
-        def callback(results):
-            self.model.clear()
-            for i in results:
-                if i.resultType is 'song':
-                    mk = "<b>%s</b> by %s"%(html.escape(i.title), html.escape(i.artist))
-                elif i.resultType is 'artist':
-                    mk = "<b>%s</b> (artist)"%(html.escape(i.name))
-                self.model.append((i, mk))
-            self.treeview.show()
-        self.worker_run('search', (query,), callback, "Searching...")
-        
+
+    @GtkTemplate.Callback
     def get_selected(self):
         sel = self.treeview.get_selection().get_selected()
         if sel[1]:
             return self.treeview.get_model().get_value(sel[1], 0)
-            
+
+    def search(self, query):
+        self.query = query
+        self.model.clear()
+
+        if not self.query:
+            return
+
+        def callback(results):
+            self.model.clear()
+
+            if not self.query:
+                return
+
+            for i in results:
+                if i.resultType is 'song':
+                    mk = '<b>{}</b> by {}'.format(html.escape(i.title), html.escape(i.artist))
+                elif i.resultType is 'artist':
+                    mk = '<b>{}</b> (artist)'.format(html.escape(i.name))
+                elif i.resultType is 'genre':
+                    mk = '<b>{}</b> (genre)'.format(html.escape(i.stationName))
+                self.model.append((i, mk))
+            self.treeview.show()
+        self.worker_run('search', (self.query,), callback, "Searching...")
+
     def cursor_changed(self, *ignore):
         self.result = self.get_selected()
-        self.okbtn.set_sensitive(not not self.result)
-        
-
-def NewSearchDialog(worker_run):
-    """NewSearchDialog - returns a fully instantiated
-    dialog-camel_case_nameDialog object. Use this function rather than
-    creating SearchDialog instance directly.
-    
-    """
-
-    builder = Gtk.Builder()
-    builder.add_from_file(get_ui_file('search'))    
-    dialog = builder.get_object("search_dialog")
-    dialog.finish_initializing(builder, worker_run)
-    return dialog
-
-if __name__ == "__main__":
-    dialog = NewSearchDialog()
-    dialog.show()
-    Gtk.main()
-
+        self.set_response_sensitive(Gtk.ResponseType.OK, not not self.result)

@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generated with glade 3.18.1 -->
+<interface>
+  <requires lib="gtk+" version="3.14"/>
+  <object class="GtkAdjustment" id="adjustment1">
+    <property name="upper">100</property>
+    <property name="step_increment">1</property>
+    <property name="page_increment">10</property>
+    <property name="page_size">10</property>
+  </object>
+  <template class="PithosWindow" parent="GtkApplicationWindow">
+    <property name="title" translatable="yes">Pithos</property>
+    <property name="default_width">500</property>
+    <property name="default_height">360</property>
+    <property name="icon_name">io.github.Pithos</property>
+    <signal name="configure-event" handler="on_configure_event" swapped="no"/>
+    <signal name="destroy" handler="on_destroy" swapped="no"/>
+    <child>
+      <object class="GtkBox" id="vbox1">
+        <property name="visible">1</property>
+        <property name="orientation">vertical</property>
+        <child>
+          <object class="GtkToolbar" id="toolbar1">
+            <property name="visible">1</property>
+            <property name="show_arrow">0</property>
+            <property name="icon_size">2</property>
+            <child>
+              <object class="GtkToolItem" id="toolitem1">
+                <property name="visible">1</property>
+                <child>
+                  <object class="GtkBox" id="playcontrol_box">
+                    <property name="visible">1</property>
+                    <property name="homogeneous">1</property>
+                    <child internal-child="accessible">
+                      <object class="AtkObject" id="playcontrol_box-atkobject">
+                        <property name="AtkObject::accessible-description" translatable="yes">playback controls</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="playpause_button">
+                        <property name="visible">1</property>
+                        <property name="can_focus">1</property>
+                        <property name="action_name">win.playpause</property>
+                        <child internal-child="accessible">
+                          <object class="AtkObject" id="playpause_button-atkobject">
+                            <property name="AtkObject::accessible-description" translatable="yes">play/pause</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkImage" id="playpause_image">
+                            <property name="visible">1</property>
+                            <property name="icon_name">media-playback-start-symbolic</property>
+                            <property name="icon_size">2</property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkButton" id="button7">
+                        <property name="visible">1</property>
+                        <property name="can_focus">1</property>
+                        <property name="action_name">win.skip</property>
+                        <child internal-child="accessible">
+                          <object class="AtkObject" id="skip_button-atkobject">
+                            <property name="AtkObject::accessible-description" translatable="yes">skip</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkImage" id="skip_image">
+                            <property name="visible">1</property>
+                            <property name="icon_name">media-skip-forward-symbolic</property>
+                            <property name="icon_size">2</property>
+                          </object>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="position">1</property>
+                      </packing>
+                    </child>
+                    <child>
+                      <object class="GtkVolumeButton" id="volume">
+                        <property name="visible">1</property>
+                        <property name="can_focus">1</property>
+                        <property name="relief">none</property>
+                        <property name="focus_on_click">0</property>
+                        <property name="orientation">vertical</property>
+                        <property name="icons">audio-volume-muted-symbolic
+audio-volume-high-symbolic
+audio-volume-low-symbolic
+audio-volume-medium-symbolic</property>
+                        <signal name="value-changed" handler="on_volume_change_event" swapped="no"/>
+                        <child internal-child="accessible">
+                          <object class="AtkObject" id="volume-atkobject">
+                            <property name="AtkObject::accessible-description" translatable="yes">volume</property>
+                          </object>
+                        </child>
+                        <child internal-child="plus_button">
+                          <object class="GtkButton" id="volumebutton-plus_button2">
+                            <property name="can_focus">1</property>
+                            <property name="receives_default">1</property>
+                            <property name="halign">center</property>
+                            <property name="valign">center</property>
+                            <property name="relief">none</property>
+                          </object>
+                        </child>
+                        <child internal-child="minus_button">
+                          <object class="GtkButton" id="volumebutton-minus_button2">
+                            <property name="can_focus">1</property>
+                            <property name="receives_default">1</property>
+                            <property name="halign">center</property>
+                            <property name="valign">center</property>
+                            <property name="relief">none</property>
+                          </object>
+                        </child>
+                      </object>
+                      <packing>
+                        <property name="position">2</property>
+                      </packing>
+                    </child>
+                    <style>
+                      <class name="linked"/>
+                    </style>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkSeparatorToolItem" id="toolbutton1">
+                <property name="visible">1</property>
+                <property name="draw">0</property>
+              </object>
+              <packing>
+                <property name="expand">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkToolItem" id="toolbutton2">
+                <property name="visible">1</property>
+                <property name="width-request">300</property>
+                <child>
+                  <object class="GtkMenuButton" id="stations_button">
+                    <property name="visible">1</property>
+                    <property name="can_focus">1</property>
+                    <property name="halign">end</property>
+                    <child internal-child="accessible">
+                      <object class="AtkObject" id="stations_button-atkobject">
+                        <property name="AtkObject::accessible-description" translatable="yes">stations</property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="box2">
+                        <property name="visible">1</property>
+                        <property name="spacing">5</property>
+                        <child>
+                          <object class="GtkLabel" id="stations_label">
+                            <property name="visible">1</property>
+                            <property name="single_line_mode">1</property>
+                            <property name="ellipsize">end</property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkImage" id="image1">
+                            <property name="visible">1</property>
+                            <property name="halign">end</property>
+                            <property name="valign">center</property>
+                            <property name="icon_name">pan-down-symbolic</property>
+                            <property name="icon_size">1</property>
+                          </object>
+                          <packing>
+                            <property name="position">1</property>
+                          </packing>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkScrolledWindow" id="scrolledwindow1">
+            <property name="visible">1</property>
+            <property name="vadjustment">adjustment1</property>
+            <property name="hscrollbar_policy">never</property>
+            <child>
+              <object class="GtkTreeView" id="songs_treeview">
+                <property name="visible">1</property>
+                <property name="can_focus">1</property>
+                <property name="has_focus">1</property>
+                <property name="vadjustment">adjustment1</property>
+                <property name="headers_visible">0</property>
+                <property name="fixed_height_mode">1</property>
+                <property name="enable_search">0</property>
+                <child internal-child="selection">
+                  <object class="GtkTreeSelection" id="treeview-selection1"/>
+                </child>
+              </object>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">1</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkStatusbar" id="statusbar">
+            <property name="visible">1</property>
+            <property name="spacing">2</property>
+          </object>
+          <packing>
+            <property name="position">2</property>
+          </packing>
+        </child>
+      </object>
+    </child>
+  </template>
+  <object class="GtkMessageDialog" id="api_update_dialog_real">
+    <property name="modal">1</property>
+    <property name="transient_for">PithosWindow</property>
+    <property name="message_type">error</property>
+    <property name="text" translatable="yes">Pithos Upgrade Required</property>
+    <property name="secondary_text" translatable="yes">Pithos needs to be updated for compatibility with Pandora&apos;s latest changes.</property>
+    <property name="secondary_use_markup">1</property>
+    <child type="action">
+      <object class="GtkButton" id="button4">
+        <property name="label" translatable="yes">Get Help Online</property>
+        <property name="visible">1</property>
+      </object>
+    </child>
+    <child type="action">
+      <object class="GtkButton" id="button5">
+        <property name="label" translatable="yes">Quit</property>
+        <property name="visible">1</property>
+        <property name="can_default">1</property>
+      </object>
+    </child>
+    <action-widgets>
+      <action-widget response="1">button4</action-widget>
+      <action-widget response="0" default="true">button5</action-widget>
+    </action-widgets>
+  </object>
+  <object class="GtkMessageDialog" id="error_dialog_real">
+    <property name="modal">1</property>
+    <property name="transient_for">PithosWindow</property>
+    <property name="message_type">error</property>
+    <property name="text" translatable="yes">Error</property>
+    <child type="action">
+      <object class="GtkButton" id="button1">
+        <property name="label" translatable="yes">Cancel</property>
+        <property name="visible">1</property>
+      </object>
+    </child>
+    <child type="action">
+      <object class="GtkButton" id="button2">
+        <property name="label" translatable="yes">Retry</property>
+        <property name="visible">1</property>
+      </object>
+    </child>
+    <child type="action">
+      <object class="GtkButton" id="button3">
+        <property name="label" translatable="yes">Preferences</property>
+        <property name="visible">1</property>
+        <property name="can_default">1</property>
+      </object>
+    </child>
+    <action-widgets>
+      <action-widget response="1">button1</action-widget>
+      <action-widget response="2">button2</action-widget>
+      <action-widget response="3" default="true">button3</action-widget>
+    </action-widgets>
+  </object>
+  <object class="GtkMessageDialog" id="fatal_error_dialog_real">
+    <property name="modal">1</property>
+    <property name="skip_taskbar_hint">1</property>
+    <property name="transient_for">PithosWindow</property>
+    <property name="message_type">error</property>
+    <property name="text" translatable="yes">Error</property>
+    <child type="action">
+      <object class="GtkButton" id="button-error-quit">
+        <property name="label" translatable="yes">Quit</property>
+        <property name="visible">1</property>
+        <property name="can_default">1</property>
+      </object>
+    </child>
+    <action-widgets>
+      <action-widget response="1" default="true">button-error-quit</action-widget>
+    </action-widgets>
+  </object>
+  <object class="GtkMenu" id="song_menu">
+    <property name="visible">1</property>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_info">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">Song _Info...</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_info" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_love">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">_Love Song</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_love" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_unlove">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">_Unlove Song</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_unrate" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_ban">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">_Ban Song</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_ban" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_unban">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">_Unban Song</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_unrate" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_tired">
+        <property name="visible">1</property>
+        <property name="tooltip_text" translatable="yes">Don&apos;t play song for a month</property>
+        <property name="label" translatable="yes">_Tired of this song</property>
+        <property name="use_underline">1</property>
+        <signal name="activate" handler="on_menuitem_tired" swapped="no"/>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="song_menu_create_station">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">Create a New Station</property>
+        <child type="submenu">
+          <object class="GtkMenu" id="create_station_submenu">
+            <property name="visible">1</property>
+            <child>
+              <object class="GtkMenuItem" id="song_menu_create_song_station">
+                <property name="visible">1</property>
+                <property name="label" translatable="yes">Based on this Song</property>
+                <signal name="activate" handler="on_menuitem_create_song_station" swapped="no"/>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuItem" id="song_menu_create_artist_station">
+                <property name="visible">1</property>
+                <property name="label" translatable="yes">Based on this Artist</property>
+                <signal name="activate" handler="on_menuitem_create_artist_station" swapped="no"/>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkMenuItem" id="menuitem4">
+        <property name="visible">1</property>
+        <property name="label" translatable="yes">Bookmark</property>
+        <child type="submenu">
+          <object class="GtkMenu" id="menu1">
+            <property name="visible">1</property>
+            <child>
+              <object class="GtkMenuItem" id="menuitem2">
+                <property name="visible">1</property>
+                <property name="label" translatable="yes">Song</property>
+                <signal name="activate" handler="on_menuitem_bookmark_song" swapped="no"/>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuItem" id="menuitem3">
+                <property name="visible">1</property>
+                <property name="label" translatable="yes">Artist</property>
+                <signal name="activate" handler="on_menuitem_bookmark_artist" swapped="no"/>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

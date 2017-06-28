@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Generated with glade 3.16.1 -->
+<interface>
+  <requires lib="gtk+" version="3.14"/>
+  <template class="AboutPithosDialog" parent="GtkAboutDialog">
+    <property name="program_name">Pithos</property>
+    <property name="copyright" translatable="yes">Copyright © 2012 Kevin Mehall</property>
+    <property name="comments" translatable="yes">A Pandora Radio client for the GNOME Desktop</property>
+    <property name="website">https://pithos.github.io</property>
+    <property name="authors">Kevin Mehall
+Patrick Griffis
+Brad Pitcher
+Christopher Eby
+Steven Allen
+Greg Sheremeta
+Glenn Moss
+Jason Gray
+    </property>
+    <property name="artists">Jason Gray</property>
+    <property name="license_type">gpl-3-0</property>
+  </template>
+</interface>
