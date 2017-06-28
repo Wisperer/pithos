@@ -780,7 +780,10 @@ class PithosWindow(Gtk.ApplicationWindow):
         # split save to a file
         #self.buffer_percent = 100
         # set output file
-        self.outfolder="%s/%s" % (self.preferences['save_to'],self.current_station.name)
+
+        save_dir = os.environ.get("PITHOSFLY_SAVE_DIR", "pithos_dl")
+
+        self.outfolder="%s/%s" % (save_dir, self.current_station.name)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
         self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
