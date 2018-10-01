@@ -28,7 +28,9 @@ import time
 import urllib.request, urllib.parse, urllib.error
 import codecs
 import ssl
+import os
 from enum import IntEnum
+from socket import error as SocketError
 
 from . import data
 
@@ -100,11 +102,11 @@ class ApiError(IntEnum):
         if value == 1:
             return 'Pandora is performing maintenance.\nTry again later.'
         elif value == 12:
-            return 'Pandora is not available in your country.\n'
-            'If you wish to use Pandora you must configure your system or Pithos proxy accordingly.'
+            return ('Pandora is not available in your country.\n'
+                    'If you wish to use Pandora you must configure your system or Pithos proxy accordingly.')
         elif value == 13:
-            return 'Out of sync. Correct your system\'s clock.\n'
-            'If the problem persists, a Pithos update may be required.'
+            return ('Out of sync. Correct your system\'s clock.\n'
+                    'If the problem persists it may indicate a Pandora API change.\nA Pithos update may be required.')
         if value == 1000:
             return 'Pandora is in read-only mode.\nTry again later.'
         elif value == 1002:
@@ -112,8 +114,8 @@ class ApiError(IntEnum):
         elif value == 1003:
             return 'A Pandora One account is required to access this feature.\nUncheck "Pandora One" in Settings.'
         elif value == 1005:
-            return 'You have reached the maximum number of stations.\n'
-            'To add a new station you must first delete an existing station.'
+            return ('You have reached the maximum number of stations.\n'
+                    'To add a new station you must first delete an existing station.')
         elif value == 1010:
             return 'Invalid Pandora partner keys.\nA Pithos update may be required.'
         elif value == 1023:
@@ -156,6 +158,7 @@ class Pandora:
     def __init__(self):
         self.opener = self.build_opener()
         self.connected = False
+        self.isSubscriber = False
 
     def pandora_encrypt(self, s):
         return b''.join([codecs.encode(self.blowfish_encode.encrypt(pad(s[i:i+8], 8)), 'hex_codec') for i in range(0, len(s), 8)])
@@ -207,6 +210,13 @@ class Pandora:
                 raise PandoraTimeout("Network error", submsg="Timeout")
             else:
                 raise PandoraNetError("Network error", submsg=e.reason.strerror)
+        except SocketError as e:
+            try:
+                error_string = os.strerror(e.errno)
+            except (TypeError, ValueError):
+                error_string = "Unknown Error"
+            logging.error("Network Socket Error: %s", error_string)
+            raise PandoraNetError("Network Socket Error", submsg=error_string)
 
         logging.debug(text)
 
@@ -288,13 +298,13 @@ class Pandora:
         pandora_time = int(self.pandora_decrypt(partner['syncTime'].encode('utf-8'))[4:14])
         self.time_offset = pandora_time - time.time()
         logging.info("Time offset is %s", self.time_offset)
-
-        user = self.json_call('auth.userLogin', {'username': user, 'password': password, 'loginType': 'user'}, https=True)
+        auth_args = {'username': user, 'password': password, 'loginType': 'user', 'returnIsSubscriber': True}
+        user = self.json_call('auth.userLogin', auth_args, https=True)
         self.userId = user['userId']
         self.userAuthToken = user['userAuthToken']
 
         self.connected = True
-        self.get_stations(self)
+        self.isSubscriber = user['isSubscriber']
 
     @property
     def explicit_content_filter_state(self):
@@ -350,11 +360,23 @@ class Pandora:
 
     def add_station_by_music_id(self, musicid):
         d = self.json_call('station.createStation', {'musicToken': musicid})
-        return Station(self, d)
+        station = Station(self, d)
+        if not self.get_station_by_id(station.id):
+            self.stations.append(station)
+        return station
 
     def add_station_by_track_token(self, trackToken, musicType):
         d = self.json_call('station.createStation', {'trackToken': trackToken, 'musicType': musicType})
-        return Station(self, d)
+        station = Station(self, d)
+        if not self.get_station_by_id(station.id):
+            self.stations.append(station)
+        return station
+
+    def delete_station(self, station):
+        if self.get_station_by_id(station.id):
+            logging.info("pandora: Deleting Station")
+            self.json_call('station.deleteStation', {'stationToken': station.idToken})
+            self.stations.remove(station)
 
     def get_station_by_id(self, id):
         for i in self.stations:
@@ -378,6 +400,7 @@ class Station:
         self.idToken = d['stationToken']
         self.isCreator = not d['isShared']
         self.isQuickMix = d['isQuickMix']
+        self.isThumbprint = d.get('isThumbprint', False)
         self.name = d['stationName']
         self.useQuickMix = False
 
@@ -416,8 +439,7 @@ class Station:
             self.name = new_name
 
     def delete(self):
-        logging.info("pandora: Deleting Station")
-        self.pandora.json_call('station.deleteStation', {'stationToken': self.idToken})
+        self.pandora.delete_station(self)
 
     def __repr__(self):
         return '<{}.{} {} "{}">'.format(
@@ -431,7 +453,17 @@ class Song:
     def __init__(self, pandora, d, playlist_time):
         self.pandora = pandora
         self.playlist_time = playlist_time
-
+        self.is_ad = None  # None = we haven't checked, otherwise True/False
+        self.tired = False
+        self.message = ''
+        self.duration = None
+        self.position = None
+        self.bitrate = None
+        self.start_time = None
+        self.finished = False
+        self.feedbackId = None
+        self.bitrate = None
+        self.artUrl = None
         self.album = d['albumName']
         self.artist = d['artistName']
         self.trackToken = d['trackToken']
@@ -442,7 +474,7 @@ class Song:
         self.songExplorerUrl = d['songExplorerUrl']
         self.artRadio = d['albumArtUrl']
         self.trackLength = d['trackLength']
-
+        self.trackGain = float(d.get('trackGain', '0.0'))
         self.audioUrlMap = d['audioUrlMap']
 
         # Optionally we requested more URLs
@@ -463,40 +495,23 @@ class Song:
                     'audioUrl': d['additionalAudioUrl'][0],
                 }
 
-        self.is_ad = None  # None = we haven't checked, otherwise True/False
-        self.tired=False
-        self.message=''
-        self.duration = None
-        self.position = None
-        self.bitrate = None
-        self.start_time = None
-        self.finished = False
-        self.feedbackId = None
-        self.bitrate = None
-        self.artUrl = None
-        self._title = ''
+        # the actual name of the track, minus any special characters (except dashes) is stored
+        # as the last part of the songExplorerUrl, before the args.
+        explorer_name = self.songExplorerUrl.split('?')[0].split('/')[-1]
+        clean_expl_name = NAME_COMPARE_REGEX.sub('', explorer_name).lower()
+        clean_name = NAME_COMPARE_REGEX.sub('', self.songName).lower()
 
-    @property
-    def title(self):
-        if not self._title:
-            # the actual name of the track, minus any special characters (except dashes) is stored
-            # as the last part of the songExplorerUrl, before the args.
-            explorer_name = self.songExplorerUrl.split('?')[0].split('/')[-1]
-            clean_expl_name = NAME_COMPARE_REGEX.sub('', explorer_name).lower()
-            clean_name = NAME_COMPARE_REGEX.sub('', self.songName).lower()
+        if clean_name == clean_expl_name:
+            self.title = self.songName
+        else:
+            try:
+                with urllib.request.urlopen(self.songExplorerUrl) as x, minidom.parseString(x.read()) as dom:
+                    attr_value = dom.getElementsByTagName('songExplorer')[0].attributes['songTitle'].value
 
-            if clean_name == clean_expl_name:
-                self._title = self.songName
-            else:
-                try:
-                    with urllib.request.urlopen(self.songExplorerUrl) as x, minidom.parseString(x.read()) as dom:
-                        attr_value = dom.getElementsByTagName('songExplorer')[0].attributes['songTitle'].value
-
-                    # Pandora stores their titles for film scores and the like as 'Score name: song name'
-                    self._title = attr_value.replace('{0}: '.format(self.songName), '', 1)
-                except:
-                    self._title = self.songName
-        return self._title
+                # Pandora stores their titles for film scores and the like as 'Score name: song name'
+                self.title = attr_value.replace('{0}: '.format(self.songName), '', 1)
+            except:
+                self.title = self.songName
 
     @property
     def audioUrl(self):
@@ -516,17 +531,17 @@ class Song:
     def station(self):
         return self.pandora.get_station_by_id(self.stationId)
 
-    def get_duration_sec (self):
-      if self.duration is not None:
-        return self.duration / 1000000000
-      else:
-        return self.trackLength
+    def get_duration_sec(self):
+        if self.duration is not None:
+            return self.duration // 1000000000
+        else:
+            return self.trackLength
 
-    def get_position_sec (self):
-      if self.position is not None:
-        return self.position / 1000000000
-      else:
-        return 0
+    def get_position_sec(self):
+        if self.position is not None:
+            return self.position // 1000000000
+        else:
+            return 0
 
     def rate(self, rating):
         if self.rating != rating:
@@ -569,7 +584,7 @@ class Song:
             __name__,
             __class__.__name__,
             self.trackToken,
-            self.songName,
+            self.title,
             self.artist,
             self.album,
         )

@@ -23,7 +23,8 @@ import math
 
 from gi.repository import (
     GLib,
-    Gio
+    Gio,
+    Gtk
 )
 from .dbus_util.DBusServiceObject import (
     DBusServiceObject,
@@ -37,21 +38,21 @@ from pithos.plugin import PithosPlugin
 
 class MprisPlugin(PithosPlugin):
     preference = 'enable_mpris'
-    description = 'Allows control with external programs'
+    description = 'Control with external programs'
 
     def on_prepare(self):
-        '''Gets the Dbus Session Bus and initializes PithosMprisService.'''
-        try:
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-        except GLib.Error as e:
-            logging.warning('Failed to connect to session bus: {}'.format(e))
-            return 'Failed to connect to DBus'
-
-        try:
-            self.mpris = PithosMprisService(self.window, connection=bus)
-        except Exception as e:
-            logging.warning('Failed to create DBus mpris service: {}'.format(e))
-            return 'Failed to create DBus mpris service'
+        if self.bus is None:
+            logging.debug('Failed to connect to DBus')
+            self.prepare_complete(error='Failed to connect to DBus')
+        else:
+            try:
+                self.mpris = PithosMprisService(self.window, connection=self.bus)
+            except Exception as e:
+                logging.warning('Failed to create DBus mpris service: {}'.format(e))
+                self.prepare_complete(error='Failed to create DBus mpris service')
+            else:
+                self.preferences_dialog = MprisPluginPrefsDialog(self.window, self.settings)
+                self.prepare_complete()
 
     def on_enable(self):
         '''Enables the mpris plugin.'''
@@ -89,6 +90,7 @@ class PithosMprisService(DBusServiceObject):
 
     def _reset(self):
         '''Resets state to default.'''
+        self._has_thumbprint_radio = False
         self._volume = math.pow(self.window.player.props.volume, 1.0 / 3.0)
         self._metadata = self.NO_TRACK_METADATA
         self._metadata_list = [self.NO_TRACK_METADATA]
@@ -147,14 +149,9 @@ class PithosMprisService(DBusServiceObject):
             )
 
         if song:
-            songs_model = window.songs_model
-            stop = len(songs_model)
-            start = max(0, stop - 5)
-            songs = [songs_model[i][0] for i in range(start, stop)]
-
             self._songs_added_handler(
                 window,
-                songs,
+                4,
             )
 
             self._metadatachange_handler(
@@ -285,6 +282,8 @@ class PithosMprisService(DBusServiceObject):
 
     def _update_playlists_handler(self, window, stations):
         '''Updates the Playlist Interface when stations are loaded/refreshed.'''
+        # The Thumbprint Radio Station may not exist if it does it will be the 2nd station.
+        self._has_thumbprint_radio = stations[1].isThumbprint
         self._playlists = [(self.PLAYLIST_OBJ_PATH + station.id, station.name, '') for station in stations]
         self.PropertiesChanged(
             self.MEDIA_PLAYER2_PLAYLISTS_IFACE,
@@ -317,7 +316,10 @@ class PithosMprisService(DBusServiceObject):
         '''Adds a new station to the Playlist Interface when it is created.'''
         new_playlist = (self.PLAYLIST_OBJ_PATH + station.id, station.name, '')
         if new_playlist not in self._playlists:
-            self._playlists.insert(1, new_playlist)
+            if self._has_thumbprint_radio:
+                self._playlists.insert(2, new_playlist)
+            else:
+                self._playlists.insert(1, new_playlist)
             self.PropertiesChanged(
                 self.MEDIA_PLAYER2_PLAYLISTS_IFACE,
                 {'PlaylistCount': GLib.Variant('u', len(self._playlists))},
@@ -359,14 +361,14 @@ class PithosMprisService(DBusServiceObject):
                 [],
             )
 
-    def _songs_added_handler(self, window, songs):
+    def _songs_added_handler(self, window, song_count):
         '''Adds songs to the TrackList Interface.'''
-        # Replace the old playlist with the new one but make sure to include the current song.
+        songs_model = window.songs_model
+        stop = len(songs_model)
+        start = max(0, stop - (song_count + 1))
+        songs = [songs_model[i][0] for i in range(start, stop)]
         self._tracks = [self._track_id_from_song(song) for song in songs]
         self._metadata_list = [self._get_metadata(window, song) for song in songs]
-        if window.current_song and window.current_song not in songs:
-            self._tracks.insert(0, self._track_id_from_song(window.current_song))
-            self._metadata_list.insert(0, self._get_metadata(window, window.current_song))
         self.TrackListReplaced(self._tracks, self._tracks[0])
 
     def _metadatachange_handler(self, window, song):
@@ -378,13 +380,14 @@ class PithosMprisService(DBusServiceObject):
         trackId = self._track_id_from_song(song)
         if trackId in self._tracks:
             for index, track_id in enumerate(self._tracks):
-                if track_id == trackId:
+                if track_id == trackId and not self._metadata_equal(self._metadata_list[index], metadata):
                     self._metadata_list[index] = metadata
                     self.TrackMetadataChanged(trackId, metadata)
                     break
         # No need to update the current metadata if the current song has been banned
         # or set tired as it will be skipped anyway very shortly.
-        if song is window.current_song and not (song.tired or song.rating == 'ban'):
+        if (song is window.current_song and not (song.tired or song.rating == 'ban') and
+                not self._metadata_equal(self._metadata, metadata)):
             self._metadata = metadata
             self.PropertiesChanged(
                 self.MEDIA_PLAYER2_PLAYER_IFACE,
@@ -396,7 +399,7 @@ class PithosMprisService(DBusServiceObject):
         '''Generates metadata for a song.'''
         # Map pithos ratings to something MPRIS understands
         userRating = 1.0 if song.rating == 'love' else 0.0
-        duration = self._duration if song is window.current_song else song.trackLength * 1000000
+        duration = song.get_duration_sec() * 1000000
         pithos_rating = window.song_icon(song) or ''
         trackid = self._track_id_from_song(song)
 
@@ -419,6 +422,16 @@ class PithosMprisService(DBusServiceObject):
 
         return metadata
 
+    def _metadata_equal(self, m1, m2):
+        # Test to see if 2 sets of metadata are the same
+        # to avoid unneeded updates.
+        if len(m1) != len(m2):
+            return False
+        for key in m1.keys():
+            if not m1[key].equal(m2[key]):
+                return False
+        return True
+
     def _song_from_track_id(self, TrackId):
         '''Convenience method that takes a TrackId and returns the corresponding song object.'''
         if TrackId not in self._tracks:
@@ -436,17 +449,6 @@ class PithosMprisService(DBusServiceObject):
     def _track_id_from_song(self, song):
         '''Convenience method that generates a TrackId based on a song.'''
         return self.TRACK_OBJ_PATH + codecs.encode(bytes(song.trackToken, 'ascii'), 'hex').decode('ascii')
-
-    @property
-    def _duration(self):
-        '''The current song's Duration.'''
-        # use the duration provided by Pandora
-        # if Gstreamer hasn't figured out the duration yet
-        duration = self.window.query_duration()
-        if duration is not None:
-            return duration // 1000
-        else:
-            return self.window.current_song.trackLength * 1000000
 
     @dbus_property(MEDIA_PLAYER2_IFACE, signature='b')
     def CanQuit(self):
@@ -509,18 +511,36 @@ class PithosMprisService(DBusServiceObject):
 
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='s')
     def LoopStatus(self):
-        '''s Read only (optional) Interface MediaPlayer2.Player'''
+        '''s Read/Write only (optional) Interface MediaPlayer2.Player'''
         return 'None'
+
+    @LoopStatus.setter
+    def LoopStatus(self, LoopStatus):
+        '''Not Implemented'''
+        # There is no way to tell clients this property can't be set.
+        pass
 
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='b')
     def Shuffle(self):
-        '''b Read only (optional) Interface MediaPlayer2.Player'''
+        '''b Read/Write (optional) Interface MediaPlayer2.Player'''
         return False
+
+    @Shuffle.setter
+    def Shuffle(self, Shuffle):
+        '''Not Implemented'''
+        # There is no way to tell clients this property can't be set.
+        pass
 
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='d')
     def Rate(self):
-        '''d Read only (optional) Interface MediaPlayer2.Player'''
+        '''d Read/Write Interface MediaPlayer2.Player'''
         return 1.0
+
+    @Rate.setter
+    def Rate(self, Rate):
+        '''Not Implemented'''
+        # There is no way to tell clients this property can't be set.
+        pass
 
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='a{sv}')
     def Metadata(self):
@@ -581,9 +601,7 @@ class PithosMprisService(DBusServiceObject):
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='b')
     def CanSeek(self):
         '''b Read only Interface MediaPlayer2.Player'''
-        # This a lie because some sound applets depend upon
-        # this to show song position/duration info
-        return True
+        return False
 
     @dbus_property(MEDIA_PLAYER2_PLAYER_IFACE, signature='b')
     def CanControl(self):
@@ -674,7 +692,7 @@ class PithosMprisService(DBusServiceObject):
     @dbus_method(MEDIA_PLAYER2_PLAYER_IFACE, in_signature='x')
     def Seek(self, Offset):
         '''Not Implemented'''
-        self.Seeked(self.Position)
+        pass
 
     @dbus_method(MEDIA_PLAYER2_PLAYER_IFACE, in_signature='s')
     def OpenUri(self, Uri):
@@ -683,41 +701,22 @@ class PithosMprisService(DBusServiceObject):
 
     @dbus_method(MEDIA_PLAYER2_PLAYER_IFACE, in_signature='ox')
     def SetPosition(self, TrackId, Position):
-        '''
-        We can't actually seek, we lie so gnome-shell-extensions-mediaplayer[1] will show the
-        position slider. We send a Seeked signal with the current position to make sure applets
-        update their postion.
-
-        Under normal circumstances SetPosition would tell the player where to seek to and any
-        seeking caused by either the MPRIS client or the player would cause a Seeked signal to
-        be fired with current track position after the seek.
-
-        (The MPRIS client tells the player that it wants to seek to a position >>>
-         the player seeks to the disired position >>>
-         the player tells the MPRIS client were it actually seeked too.)
-
-        We're skipping the middleman(Pithos) because we can't seek. Some players do not send
-        a Seeked signal and some clients workaround that[2] so this may not be necessary for
-        all clients.
-
-        [1] https://github.com/eonpatapon/gnome-shell-extensions-mediaplayer/issues/246
-        [2] https://github.com/eonpatapon/gnome-shell-extensions-mediaplayer#known-bugs
-        '''
-
-        self.Seeked(self.Position)
+        '''Not Implemented'''
+        pass
 
     @dbus_method(MEDIA_PLAYER2_PLAYLISTS_IFACE, in_signature='uusb', out_signature='a(oss)')
     def GetPlaylists(self, Index, MaxCount, Order, ReverseOrder):
         '''(uusb) -> a(oss) Interface MediaPlayer2.Playlists'''
         playlists = self._playlists[:]
-        quick_mix = playlists.pop(0)
+        always_first = [playlists.pop(0)] # the QuickMix
+        if self._has_thumbprint_radio:
+            always_first.append(playlists.pop(0)) # Thumbprint Radio if it exists
 
         if Order not in ('CreationDate', 'Alphabetical') or Order == 'Alphabetical':
             playlists = sorted(playlists, key=lambda playlists: playlists[1])
         if ReverseOrder:
             playlists.reverse()
-        playlists = playlists[Index:MaxCount - 1]
-        playlists.insert(0, quick_mix)
+        playlists = always_first + playlists[Index:MaxCount - len(always_first)]
         return playlists
 
     @dbus_method(MEDIA_PLAYER2_PLAYLISTS_IFACE, in_signature='o')
@@ -749,7 +748,7 @@ class PithosMprisService(DBusServiceObject):
     def GoTo(self, TrackId):
         '''(o) -> nothing Interface MediaPlayer2.TrackList'''
         song = self._song_from_track_id(TrackId)
-        if song and song.index > self.window.current_song_index:
+        if song and song.index > self.window.current_song_index and not (song.tired or song.rating == 'ban'):
             self.window.start_song(song.index)
 
     @dbus_method(MEDIA_PLAYER2_RATINGS_IFACE, in_signature='o')
@@ -824,3 +823,60 @@ class PithosMprisService(DBusServiceObject):
                                         ))
         except GLib.Error as e:
             logging.warning(e)
+
+
+class MprisPluginPrefsDialog(Gtk.Dialog):
+    __gtype_name__ = 'MprisPluginPrefsDialog'
+
+    def __init__(self, window, settings):
+        super().__init__(use_header_bar=1)
+        self.set_title(_('Hide on Close'))
+        self.set_default_size(300, -1)
+        self.set_resizable(False)
+        self.connect('delete-event', self.on_close)
+
+        self.pithos = window
+        self.settings = settings
+        self.window_delete_handler = None
+
+        box = Gtk.Box()
+        label = Gtk.Label()
+        label.set_markup('<b>{}</b>\n{}'.format(_('Hide Pithos on Close'), _('Instead of Quitting')))
+        label.set_halign(Gtk.Align.START)
+        box.pack_start(label, True, True, 4)
+
+        self.switch = Gtk.Switch()
+        self.switch.connect('notify::active', self.on_activated)
+        self.switch.set_active(self.settings['data'] == 'True')
+        self.settings.connect('changed::enabled', self._on_plugin_enabled)
+        self.switch.set_halign(Gtk.Align.END)
+        self.switch.set_valign(Gtk.Align.CENTER)
+        box.pack_end(self.switch, False, False, 2)
+
+        content_area = self.get_content_area()
+        content_area.add(box)
+        content_area.show_all()
+
+    def on_close(self, window, event):
+        window.hide()
+        return True
+
+    def on_activated(self, *ignore):
+        if self.switch.get_active():
+            self.settings['data'] = 'True'
+            self.delete_callback_handle = self.pithos.connect('delete-event', self.on_close)
+        else:
+            self.settings['data'] = 'False'
+            self._disable()
+
+    def _on_plugin_enabled(self, *ignore):
+        if self.settings['enabled']:
+            self.switch.set_active(self.settings['data'] == 'True')
+        else:
+            self._disable()
+
+    def _disable(self):
+        if self.delete_callback_handle:
+            self.pithos.disconnect(self.delete_callback_handle)
+            self.pithos.connect('delete-event', self.pithos.on_destroy)
+        self.window_delete_handler = None

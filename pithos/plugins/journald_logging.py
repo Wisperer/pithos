@@ -41,7 +41,9 @@ class JournalLoggingPlugin(PithosPlugin):
             self._logger = logging.getLogger()
             self.preferences_dialog = LoggingPluginPrefsDialog(self.window, self.settings)
         except ImportError:
-            return _('Systemd Python module not found')
+            self.prepare_complete(error=_('Systemd Python module not found'))
+        else:
+            self.prepare_complete()
 
     def on_enable(self):
         self._on_logging_changed(None, self.settings['data'] or 'verbose')
@@ -77,7 +79,8 @@ class LoggingPluginPrefsDialog(Gtk.Dialog):
         self.pithos_window = parent
         self.settings = settings
         self.set_resizable(False)
-        self.connect('response', self._on_response)
+
+        self.connect('delete-event', lambda *ignore: self.response(Gtk.ResponseType.CANCEL) or True)
 
         sub_title = Gtk.Label.new(_('Set the journald logging level for Pithos'))
         sub_title.set_halign(Gtk.Align.CENTER)
@@ -102,7 +105,7 @@ class LoggingPluginPrefsDialog(Gtk.Dialog):
     def _reset_combo(self):
         self.log_level_combo.set_active_id(self.settings['data'] or 'verbose')
 
-    def _on_response(self, dialog, response):
+    def do_response(self, response):
         if response != Gtk.ResponseType.APPLY:
             self.hide()
             self._reset_combo()

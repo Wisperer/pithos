@@ -18,8 +18,7 @@ import logging
 from gi.repository import Gio, Gtk, GObject, Pango
 
 from .gi_composites import GtkTemplate
-from .util import get_account_password, set_account_password
-from .pandora.data import valid_audio_formats
+from .util import SecretService
 
 try:
     import pacparser
@@ -51,7 +50,8 @@ class PithosPluginRow(Gtk.ListBoxRow):
         self.switch.connect('notify::active', self.on_activated)
         self.switch.set_valign(Gtk.Align.CENTER)
         box.pack_end(self.switch, False, False, 2)
-        self.connect('grab-focus', self.on_grab_focus)
+        self.connect('grab-focus', self.set_prefs_btn)
+        self.plugin.connect('notify::enabled', self.on_enabled)
 
         if plugin.prepared and plugin.error:
             self.set_sensitive(False)
@@ -59,7 +59,11 @@ class PithosPluginRow(Gtk.ListBoxRow):
 
         self.add(box)
 
-    def set_prefs_btn(self):
+    def on_enabled(self, *ignore):
+        if self.is_selected():
+            self.set_prefs_btn()
+
+    def set_prefs_btn(self, *ignore):
         prefs_btn = self.get_toplevel().preference_btn
         if self.plugin.enabled:
             sensitive = self.plugin.preferences_dialog is not None
@@ -71,9 +75,6 @@ class PithosPluginRow(Gtk.ListBoxRow):
         else:
             tooltip = _('This plugin either must be enabled or does not support preferences.')
         prefs_btn.set_tooltip_text(tooltip)
-
-    def on_grab_focus(self, *ignore):
-        self.set_prefs_btn()
 
     def on_activated(self, obj, params):
         if not self.is_selected():
@@ -97,7 +98,7 @@ class PreferencesPithosDialog(Gtk.Dialog):
     __gtype_name__ = "PreferencesPithosDialog"
 
     __gsignals__ = {
-        'login-changed': (GObject.SignalFlags.RUN_FIRST, None, ()),
+        'login-changed': (GObject.SignalFlags.RUN_FIRST, None, (GObject.TYPE_PYOBJECT,)),
     }
 
     preference_btn = GtkTemplate.Child()
@@ -108,7 +109,6 @@ class PreferencesPithosDialog(Gtk.Dialog):
     proxy_entry = GtkTemplate.Child()
     control_proxy_entry = GtkTemplate.Child()
     control_proxy_pac_entry = GtkTemplate.Child()
-    pandora_one_checkbutton = GtkTemplate.Child()
     explicit_content_filter_checkbutton = GtkTemplate.Child()
 
     def __init__(self, *args, **kwargs):
@@ -117,23 +117,12 @@ class PreferencesPithosDialog(Gtk.Dialog):
 
         self.settings = Gio.Settings.new('io.github.Pithos')
 
-        # initialize the "Audio Quality" combobox backing list
-        fmt_store = Gtk.ListStore(GObject.TYPE_STRING, GObject.TYPE_STRING)
-        for audio_quality in valid_audio_formats:
-            fmt_store.append(audio_quality)
-        self.audio_quality_combo.set_model(fmt_store)
-        render_text = Gtk.CellRendererText()
-        self.audio_quality_combo.pack_start(render_text, True)
-        self.audio_quality_combo.add_attribute(render_text, "text", 1)
-        self.audio_quality_combo.set_id_column(0)
-
         if not pacparser:
             self.control_proxy_pac_entry.set_sensitive(False)
             self.control_proxy_pac_entry.set_tooltip_text("Please install python-pacparser")
 
         settings_mapping = {
             'email': (self.email_entry, 'text'),
-            'pandora-one': (self.pandora_one_checkbutton, 'active'),
             'proxy': (self.proxy_entry, 'text'),
             'control-proxy': (self.control_proxy_entry, 'text'),
             'control-proxy-pac': (self.control_proxy_pac_entry, 'text'),
@@ -165,7 +154,7 @@ class PreferencesPithosDialog(Gtk.Dialog):
         dialog.show_all()
 
     @GtkTemplate.Callback
-    def on_account_changed(self, widget):
+    def on_account_changed(self, *ignore):
         if not self.email_entry.get_text() or not self.password_entry.get_text():
             self.set_response_sensitive(Gtk.ResponseType.APPLY, False)
         else:
@@ -177,17 +166,45 @@ class PreferencesPithosDialog(Gtk.Dialog):
 
     @GtkTemplate.Callback
     def on_show(self, widget):
+        def cb(password):
+            self.last_password = password
+            self.password_entry.set_text(password)
+
         self.settings.delay()
+        self.on_account_changed()
 
         self.last_email = self.settings['email']
-        self.password_entry.set_text(get_account_password(self.settings['email']))
-        self.on_account_changed(None)
+        SecretService.get_account_password(self.last_email, cb)
 
     def do_response(self, response_id):
         if response_id == Gtk.ResponseType.APPLY:
-            self.settings.apply()
-            if set_account_password(self.settings['email'], self.password_entry.get_text(),
-                                    self.last_email):
-                self.emit('login-changed')
+            def cb(success):
+                if success:
+                    self.settings.apply()
+                    self.emit('login-changed', (email, password))
+                else:
+                    # Should never really ever happen...
+                    # But just in case.
+                    self.settings.revert()
+                    self.show()
+                    dialog = Gtk.MessageDialog(
+                        parent=self,
+                        flags=Gtk.DialogFlags.MODAL,
+                        type=Gtk.MessageType.WARNING,
+                        buttons=Gtk.ButtonsType.OK,
+                        text=_('Failed to Store Your Pandora Credentials'),
+                        secondary_text=_('Please re-enter your email and password.'),
+                    )
+
+                    dialog.connect('response', lambda *ignore: dialog.destroy())
+                    dialog.show()
+
+            email = self.email_entry.get_text()
+            password = self.password_entry.get_text()
+
+            if self.last_email != email or self.last_password != password:
+                SecretService.set_account_password(self.last_email, email, password, cb)
+            else:
+                self.settings.apply()
         else:
             self.settings.revert()

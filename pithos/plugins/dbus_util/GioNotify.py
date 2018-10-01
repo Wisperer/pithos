@@ -18,6 +18,8 @@
 # <https://github.com/JasonLG1979/possibly-useful-scraps/wiki/GioNotify>
 # for documentation.
 
+import logging
+
 from enum import Enum
 
 from gi.repository import GLib, GObject, Gio
@@ -59,104 +61,83 @@ class GioNotify(Gio.DBusProxy):
             **kwargs
         )
 
-        self.time_out = -1
+        self._app_name = ''
         self._last_signal = None
-        self._caps = None
-        self._server_info = None
+        self._vendor_is_gnome = False
         self._replace_id = 0
+        self._server_info = {}
+        self._broken_signals = []
         self._actions = []
         self._callbacks = {}
         self._hints = {}
 
     @classmethod
     def async_init(cls, app_name, callback):
-        def on_init_finish(self, result, callback):
-            self.init_finish(result)
-            self.call(
-                'GetCapabilities',
-                None,
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-                on_GetCapabilities_finish,
-                callback,
-            )
+        def on_init_finish(self, result, data):
+            try:
+                self.init_finish(result)
+            except GLib.Error as e:
+                callback(None, None, None, error=e)
+            else:
+                if not self.get_name_owner():
+                    callback(None, None, None, error='Notification service is unowned')
+                else:
+                    self.call(
+                        'GetCapabilities',
+                        None,
+                        Gio.DBusCallFlags.NONE,
+                        -1,
+                        None,
+                        on_GetCapabilities_finish,
+                        None,
+                    )
 
-        def on_GetCapabilities_finish(self, result, callback):
-            caps = self.call_finish(result).unpack()[0]
-            user_data = callback, caps
-            self.call(
-                'GetServerInformation',
-                None,
-                Gio.DBusCallFlags.NONE,
-                -1,
-                None,
-                on_GetServerInformation_finish,
-                user_data,
-            )
+        def on_GetCapabilities_finish(self, result, data):
+            try:
+                caps = self.call_finish(result).unpack()[0]
+            except GLib.Error as e:
+                callback(None, None, None, error=e)
+            else:
+                self.call(
+                    'GetServerInformation',
+                    None,
+                    Gio.DBusCallFlags.NONE,
+                    -1,
+                    None,
+                    on_GetServerInformation_finish,
+                    caps,
+                )
 
-        def on_GetServerInformation_finish(self, result, user_data):
-            callback, caps = user_data
-            info = self.call_finish(result).unpack()
-            self._server_info = {
-                'name': info[0],
-                'vendor': info[1],
-                'version': info[2],
-                'spec_version': info[3],
-            }
+        def on_GetServerInformation_finish(self, result, caps):
+            try:
+                info = self.call_finish(result).unpack()
+            except GLib.Error as e:
+                callback(None, None, None, error=e)
+            else:
+                self._server_info = {
+                    'name': info[0],
+                    'vendor': info[1],
+                    'version': info[2],
+                    'spec_version': info[3],
+                }
+                self._vendor_is_gnome = info[1] == 'GNOME'
+                self._app_name = app_name
 
-            self._caps = caps
-            self._app_name = app_name
-
-            callback(self._server_info, self._caps)
+                callback(self, self._server_info, caps)
 
         self = cls()
-        self.init_async(GLib.PRIORITY_DEFAULT, None, on_init_finish, callback)
-        return self
-
-    @classmethod
-    def sync_init(cls, app_name):
-        self = cls()
-        self.init()
-        self._caps = self.call_sync(
-            'GetCapabilities',
-            None,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            None).unpack()[0]
-
-        info = self.call_sync(
-            'GetServerInformation',
-            None,
-            Gio.DBusCallFlags.NONE,
-            -1,
-            None).unpack()
-
-        self._server_info = {
-            'name': info[0],
-            'vendor': info[1],
-            'version': info[2],
-            'spec_version': info[3],
-        }
-
-        self._app_name = app_name
-        return self
-
-    @property
-    def capabilities(self):
-        return self._caps
-
-    @property
-    def server_information(self):
-        return self._server_info
+        self.init_async(GLib.PRIORITY_DEFAULT, None, on_init_finish, None)
 
     def show_new(self, summary, body, icon):
         def on_Notify_finish(self, result):
             self._replace_id = self.call_finish(result).unpack()[0]
 
+        # If the Notification server implementation's 'ActionInvoked' signal is broken
+        # our action buttons will be non-functional, so don't add them.
+        actions = self._actions if 'ActionInvoked' not in self._broken_signals else []
         args = GLib.Variant('(susssasa{sv}i)', (self._app_name, self._replace_id,
                                                 icon, summary, body,
-                                                self._actions, self._hints, self.time_out))
+                                                actions, self._hints, -1))
 
         self.call(
             'Notify',
@@ -165,18 +146,6 @@ class GioNotify(Gio.DBusProxy):
             -1,
             None,
             on_Notify_finish,
-        )
-
-    def close(self):
-        if self._replace_id == 0:
-            return
-        self.call(
-            'CloseNotification',
-            GLib.Variant('(u)', (self._replace_id,)),
-            Gio.DBusCallFlags.NONE,
-            -1,
-            None,
-            None,
         )
 
     def add_action(self, action_id, label, callback):
@@ -195,20 +164,59 @@ class GioNotify(Gio.DBusProxy):
             self._hints[key] = value
 
     def do_g_signal(self, sender_name, signal_name, parameters):
-        id, signal_value = parameters.unpack()
-        # We only care about our notifications.
-        if id != self._replace_id:
-            return
-        # In GNOME Shell at least this stops multiple
-        # redundant 'NotificationClosed' signals from being emmitted.
-        if (id, signal_name) == self._last_signal:
-            return
-        self._last_signal = id, signal_name
-        if signal_name == 'ActionInvoked':
-            self.emit('action-invoked', signal_value)
-            self._callbacks[signal_value]()
+        try:
+            notification_id, signal_value = parameters.unpack()
+        except ValueError:
+            # Deepin's notification system is broken, see:
+            # https://github.com/gnumdk/lollypop/issues/1203
+            # This will stop exceptions by ignoring parameters
+            # and send a warning message about the broken signal.
+            # Don't spam the logs only send 1 warning message per signal name.
+            if signal_name not in self._broken_signals:
+                self._broken_signals.append(signal_name)
+                server_info = '\n'.join(('{}: {}'.format(k, v) for k, v in self._server_info.items()))
+                logging.warning('Broken Notification server implementation.\n'
+                                'Missing parameter(s) for the "{}" signal.\n'
+                                'Please file a bug report with the developers '
+                                'of your current Notification server:\n{}'.format(signal_name, server_info))
         else:
-            self.emit('closed', GioNotify.Closed(signal_value))
+            # We only care about our notifications.
+            if notification_id != self._replace_id:
+                return
+            if self._vendor_is_gnome:
+                # In GNOME this stops multiple redundant 'NotificationClosed'
+                # signals from being emmitted. see: https://bugzilla.gnome.org/show_bug.cgi?id=790636
+                if (notification_id, signal_name) == self._last_signal:
+                    return
+                self._last_signal = notification_id, signal_name
+            if signal_name == 'ActionInvoked':
+                if signal_name not in self._broken_signals:
+                    callback = self._callbacks.get(signal_value)
+                    if callback:
+                        self.emit('action-invoked', signal_value)
+                        callback()
+                    else:
+                        self._broken_signals.append(signal_name)
+                        server_info = '\n'.join(('{}: {}'.format(k, v) for k, v in self._server_info.items()))
+                        logging.warning('Broken Notification server implementation.\n'
+                                        'Invalid "ActionInvoked" signal value: "{}".\n'
+                                        'Please file a bug report with the developers '
+                                        'of your current Notification server:\n{}'.format(signal_value, server_info))
+            elif signal_name == 'NotificationClosed':
+                if signal_name not in self._broken_signals:
+                    try:
+                        closed_reason = GioNotify.Closed(signal_value)
+                    except ValueError:
+                        self._broken_signals.append(signal_name)
+                        server_info = '\n'.join(('{}: {}'.format(k, v) for k, v in self._server_info.items()))
+                        logging.warning('Broken Notification server implementation.\n'
+                                        'Invalid "NotificationClosed" signal value: "{}".\n'
+                                        'Please file a bug report with the developers '
+                                        'of your current Notification server:\n{}'.format(signal_value, server_info))
+                    else:
+                        self.emit('closed', closed_reason)
+            else:
+                logging.debug('Unknown signal: "{}", value: "{}"'.format(signal_name, signal_value))
 
     def __getattr__(self, name):
         # PyGObject ships an override that breaks our usage.

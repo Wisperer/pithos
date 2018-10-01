@@ -25,35 +25,41 @@ class MediaKeyPlugin(PithosPlugin):
     preference = 'enable_mediakeys'
     description = 'Control playback with media keys'
 
-    method = None
+    mediakeys = None
+    keybinder = None
+    de_busnames = [
+        ('gnome', 'org.gnome.SettingsDaemon.MediaKeys'),
+        ('gnome', 'org.gnome.SettingsDaemon'),
+        ('mate', 'org.mate.SettingsDaemon'),
+    ]
 
     def grab_media_keys(self):
-        try:
-            self.mediakeys.call_sync(
-                'GrabMediaPlayerKeys',
-                GLib.Variant('(su)', (APP_ID, 0)),
-                Gio.DBusCallFlags.NONE, -1, None,
-            )
-
-            return True
-        except GLib.Error as e:
-            logging.debug(e)
-            return False
+        self.mediakeys.call(
+            'GrabMediaPlayerKeys',
+            GLib.Variant('(su)', (APP_ID, 0)),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            None,
+        )
 
     def release_media_keys(self):
-        try:
-            self.mediakeys.call_sync(
-                'ReleaseMediaPlayerKeys',
-                GLib.Variant('(s)', (APP_ID,)),
-                Gio.DBusCallFlags.NONE, -1, None,
-            )
-
-        except GLib.Error as e:
-            logging.debug(e)
+        self.mediakeys.call(
+            'ReleaseMediaPlayerKeys',
+            GLib.Variant('(s)', (APP_ID,)),
+            Gio.DBusCallFlags.NONE,
+            -1,
+            None,
+            None,
+        )
 
     def update_focus_time(self, widget, event, userdata=None):
         if event.changed_mask & Gdk.WindowState.FOCUSED and \
            event.new_window_state & Gdk.WindowState.FOCUSED:
+            self.grab_media_keys()
+
+    def update_active(self, *ignore):
+        if self.window.is_active():
             self.grab_media_keys()
 
     def mediakey_signal(self, proxy, sender, signal, param, userdata=None):
@@ -66,84 +72,99 @@ class MediaKeyPlugin(PithosPlugin):
                 self.window.playpause_notify()
             elif action == 'Next':
                 self.window.next_song()
-            elif action == 'Stop':
-                self.window.user_pause()
             elif action == 'Previous':
                 self.window.bring_to_top()
+            elif action in ('Stop', 'Pause'):
+                self.window.user_pause()
 
     def on_prepare(self):
-        # TODO: support more desktops.
-        try:
-            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            logging.info('Got session bus')
-        except GLib.Error as e:
-            bus = None
-            logging.warning(e)
-
-        if bus:
-            de_busnames = {
-                'gnome': ('org.gnome.SettingDaemon.MediaKeys', 'org.gnome.SettingsDaemon'),
-                'mate': ('org.mate.SettingsDaemon', )
-            }
-
-            for de, bus_names in de_busnames.items():
-                if not self.method:
-                    for bus_name in bus_names:
-                        try:
-                            self.mediakeys = Gio.DBusProxy.new_sync(
-                                bus,
-                                Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
-                                None,
-                                bus_name,
-                                '/org/{}/SettingsDaemon/MediaKeys'.format(de),
-                                'org.{}.SettingsDaemon.MediaKeys'.format(de),
-                                None,
-                            )
-
-                            if self.grab_media_keys():
-                                self.method = 'dbus'
-                                break
-                        except GLib.Error as e:
-                            logging.warning(e)
-
-        if self.method is None:
+        def prepare_keybinder():
             display = self.window.props.screen.get_display()
             if not type(display).__name__.endswith('X11Display'):
-                return 'Keybinder requires X11'
+                self.prepare_complete(error='DBus binding failed and Keybinder requires X11.')
+            else:
+                try:
+                    import gi
+                    gi.require_version('Keybinder', '3.0')
+                    from gi.repository import Keybinder
+                    self.keybinder = Keybinder
+                    self.keybinder.init()
+                except (ValueError, ImportError):
+                    self.keybinder = None
+                    self.prepare_complete(error='DBus binding failed and Keybinder not found.')
+                else:
+                    self.prepare_complete()
+
+        def on_new_finish(source, result, data):
             try:
-                import gi
-                gi.require_version('Keybinder', '3.0')
-                from gi.repository import Keybinder
-                self.keybinder = Keybinder
-                self.keybinder.init()
-                self.method = 'keybinder'
-            except (ValueError, ImportError):
-                return 'Keybinder not found'
+                mediakeys = Gio.DBusProxy.new_finish(result)
+            except GLib.Error as e:
+                logging.warning(e)
+                prepare_keybinder()
+            else:
+                if mediakeys.get_name_owner():
+                    self.mediakeys = mediakeys
+                    self.prepare_complete()
+                elif self.de_busnames:
+                    de, busname = self.de_busnames.pop(0)
+                    get_bus(de, busname)
+                else:
+                    logging.debug('DBus binding failed')
+                    prepare_keybinder()
+
+        def get_bus(de, bus_name):
+            Gio.DBusProxy.new(
+                self.bus,
+                Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+                None,
+                bus_name,
+                '/org/{}/SettingsDaemon/MediaKeys'.format(de),
+                'org.{}.SettingsDaemon.MediaKeys'.format(de),
+                None,
+                on_new_finish,
+                None
+            )
+
+        if self.bus:
+            de, busname = self.de_busnames.pop(0)
+            get_bus(de, busname)
+        else:
+            prepare_keybinder()
 
     def on_enable(self):
-        if self.method == 'dbus':
-            self.focus_hook = self.window.connect('window-state-event', self.update_focus_time)
+        if self.mediakeys:
+            iface_name = self.mediakeys.props.g_interface_name
+            if 'mate' in iface_name:
+                # Workaround for MATE not updating it's window state properly.
+                self.focus_hook = self.window.connect('notify::is-active', self.update_active)
+                self.grab_media_keys()
+            else:
+                self.focus_hook = self.window.connect('window-state-event', self.update_focus_time)
             self.mediakey_hook = self.mediakeys.connect('g-signal', self.mediakey_signal)
-            logging.info('Bound media keys with DBUS {}'.format(self.mediakeys.props.g_interface_name))
-        elif self.method == 'keybinder':
+            logging.info('Bound media keys with DBUS {}'.format(iface_name))
+        elif self.keybinder:
             ret = self.keybinder.bind('XF86AudioPlay', self.window.playpause, None)
             if not ret:  # Presumably all bindings will fail
+                self.keybinder = None # We don't need to unbind any keys
                 logging.error('Failed to bind media keys with Keybinder')
+                self.on_error('Failed to bind media keys with Keybinder')
                 return
             self.keybinder.bind('XF86AudioStop', self.window.user_pause, None)
+            self.keybinder.bind('XF86AudioPause', self.window.user_pause, None)
             self.keybinder.bind('XF86AudioNext', self.window.next_song, None)
             self.keybinder.bind('XF86AudioPrev', self.window.bring_to_top, None)
             logging.info('Bound media keys with Keybinder')
 
     def on_disable(self):
-        if self.method == 'dbus':
+        if self.mediakeys:
             self.window.disconnect(self.focus_hook)
             self.mediakeys.disconnect(self.mediakey_hook)
             self.release_media_keys()
             logging.info('Disabled dbus mediakey bindings')
-        elif self.method == 'keybinder':
+        elif self.keybinder:
             self.keybinder.unbind('XF86AudioPlay')
             self.keybinder.unbind('XF86AudioStop')
+            self.keybinder.unbind('XF86AudioPause')
             self.keybinder.unbind('XF86AudioNext')
             self.keybinder.unbind('XF86AudioPrev')
             logging.info('Disabled keybinder mediakey bindings')

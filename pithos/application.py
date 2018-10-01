@@ -22,7 +22,7 @@ gi.require_version('Gtk', '3.0')
 from gi.repository import GLib, Gio, Gtk
 
 from .pithos import PithosWindow
-from .migrate_settings import maybe_migrate_settings
+from .util import open_browser
 
 
 class PithosApplication(Gtk.Application):
@@ -31,6 +31,10 @@ class PithosApplication(Gtk.Application):
     def __init__(self, version=''):
         super().__init__(application_id='io.github.Pithos',
                          flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+
+        # First, get rid of existing logging handlers due to call in header as per
+        # http://stackoverflow.com/questions/1943747/python-logging-before-you-run-logging-basicconfig
+        logging.root.handlers = []
 
         os.environ['PULSE_PROP_application.name'] = 'Pithos'
         os.environ['PULSE_PROP_application.version'] = version
@@ -64,6 +68,10 @@ class PithosApplication(Gtk.Application):
         action.connect("activate", self.prefs_cb)
         self.add_action(action)
 
+        action = Gio.SimpleAction.new("help", None)
+        action.connect("activate", self.help_cb)
+        self.add_action(action)
+
         action = Gio.SimpleAction.new("about", None)
         action.connect("activate", self.about_cb)
         self.add_action(action)
@@ -82,10 +90,6 @@ class PithosApplication(Gtk.Application):
 
     def do_command_line(self, command_line):
         options = command_line.get_options_dict()
-
-        # First, get rid of existing logging handlers due to call in header as per
-        # http://stackoverflow.com/questions/1943747/python-logging-before-you-run-logging-basicconfig
-        logging.root.handlers = []
 
         # Show the Pithos log since last reboot and exit
         if options.contains('last-logs'):
@@ -116,13 +120,18 @@ class PithosApplication(Gtk.Application):
             got_logs = False            
 
             for entry in reader:
-                got_logs = True
-                level = _PRIORITY_TO_LEVEL[entry['PRIORITY']]
-                line = entry['CODE_LINE']
-                function = entry['CODE_FUNC']
-                module = basename(entry['CODE_FILE'])[:-3]
-                message = entry['MESSAGE']
-                log_line = '{} - {}:{}:{} - {}'.format(level, module, function, line, message)
+                try:
+                    got_logs = True
+                    level = _PRIORITY_TO_LEVEL[entry['PRIORITY']]
+                    line = entry['CODE_LINE']
+                    function = entry['CODE_FUNC']
+                    module = basename(entry['CODE_FILE'])[:-3]
+                    message = entry['MESSAGE']
+                except KeyError:
+                    self._print(command_line, _('Error Reading log entry, printing complete entry'))
+                    log_line = '\n'.join(('{}: {}'.format(k, v) for k, v in entry.items()))
+                else:
+                    log_line = '{} - {}:{}:{} - {}'.format(level, module, function, line, message)
                 self._print(command_line, log_line)
 
             if not got_logs:
@@ -135,8 +144,6 @@ class PithosApplication(Gtk.Application):
             self._print(command_line, 'Pithos {}'.format(self.version))
             return 0
 
-        handlers = []
-
         # Set the logging level to show debug messages
         if options.contains('debug'):
             log_level = logging.DEBUG
@@ -148,9 +155,8 @@ class PithosApplication(Gtk.Application):
         stream = logging.StreamHandler()
         stream.setLevel(log_level)
         stream.setFormatter(logging.Formatter(fmt='%(levelname)s - %(module)s:%(funcName)s:%(lineno)d - %(message)s'))
-        handlers.append(stream)
 
-        logging.basicConfig(level=logging.NOTSET, handlers=handlers)
+        logging.basicConfig(level=logging.NOTSET, handlers=[stream])
 
         self.test_mode = options.lookup_value('test')
 
@@ -165,7 +171,6 @@ class PithosApplication(Gtk.Application):
 
     def do_activate(self):
         if not self.window:
-            maybe_migrate_settings()
             logging.info('Pithos {}'.format(self.version))
             self.window = PithosWindow(self, self.test_mode)
 
@@ -181,6 +186,9 @@ class PithosApplication(Gtk.Application):
 
     def prefs_cb(self, action, param):
         self.window.show_preferences()
+
+    def help_cb(self, action, param):
+        open_browser("https://github.com/pithos/pithos/wiki", self.window)
 
     def about_cb(self, action, param):
         self.window.show_about(self.version)
