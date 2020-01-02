@@ -22,11 +22,13 @@ import re
 import os
 import sys
 import time
+import string
 import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
 from enum import Enum
+from mutagen.id3 import ID3,TRCK,TIT2,TALB,TPE1,APIC,TCON
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -52,15 +54,8 @@ try:
 except ImportError:
     pacparser = None
 
-# Older versions of Gstreamer may not have these constants
-try:
-    RESAMPLER_QUALITY_MAX = GstAudio.AUDIO_RESAMPLER_QUALITY_MAX
-    RESAMPLER_FILTER_MODE_FULL = GstAudio.AudioResamplerFilterMode.FULL
-except AttributeError:
-    RESAMPLER_QUALITY_MAX = 10
-    RESAMPLER_FILTER_MODE_FULL = 1
-
-ALBUM_ART_SIZE = 96
+ALBUM_ART_SIZE = 96     # size that's displayed
+ALBUM_ART_FULL_SIZE=300 # size that's stored in memory and saved to mp3
 TEXT_X_PADDING = 12
 
 FALLBACK_BLACK = Gdk.RGBA(red=0.0, green=0.0, blue=0.0, alpha=1.0)
@@ -121,7 +116,8 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
         return getattr(self, pspec.name)
     def do_render(self, ctx, widget, background_area, cell_area, flags):
         if self.pixbuf is not None:
-            Gdk.cairo_set_source_pixbuf(ctx, self.pixbuf, cell_area.x, cell_area.y)
+            gui_pixbuf=self.pixbuf.scale_simple(ALBUM_ART_SIZE,ALBUM_ART_SIZE,GdkPixbuf.InterpType.BILINEAR)# scaled down pixbuf
+            Gdk.cairo_set_source_pixbuf(ctx, gui_pixbuf, cell_area.x, cell_area.y)
             ctx.paint()
         else:
             Gdk.cairo_set_source_pixbuf(ctx, self.background, cell_area.x, cell_area.y)
@@ -182,6 +178,7 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
         rating_bg = RATING_BG_SVG.format(bg=bg_rgb).encode()
 
         with contextlib.closing(GdkPixbuf.PixbufLoader()) as loader:
+            loader.set_size(ALBUM_ART_FULL_SIZE, ALBUM_ART_FULL_SIZE)
             loader.write(background)
         self.background = loader.get_pixbuf()
 
@@ -211,6 +208,14 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
         info = current_theme.lookup_icon('go-jump-symbolic', 24, 0)
         icon, was_symbolic = info.load_symbolic(fg_color, fg_color, fg_color, fg_color)
         self.tired_icon = icon.scale_simple(12, 12, GdkPixbuf.InterpType.BILINEAR)
+
+
+def clean_name(s):
+    # for windows you can do this:
+    #valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
+    #return ''.join(c if c in valid_chars else '-' for c in s.strip())
+    return s.strip().replace("/","-")
+
 
 @GtkTemplate(ui='/io/github/Pithos/ui/PithosWindow.ui')
 class PithosWindow(Gtk.ApplicationWindow):
@@ -308,8 +313,6 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.equalizer = Gst.ElementFactory.make("equalizer-10bands", "equalizer-10bands")
         audioconvert = Gst.ElementFactory.make("audioconvert", "audioconvert")
         audioresample = Gst.ElementFactory.make("audioresample", "audioresample")
-        audioresample.set_property("quality", RESAMPLER_QUALITY_MAX)
-        audioresample.set_property("sinc-filter-mode", RESAMPLER_FILTER_MODE_FULL)
         audiosink = Gst.ElementFactory.make("autoaudiosink", "audiosink")
         sinkbin = Gst.Bin()
         sinkbin.add(self.rgvolume)
@@ -329,6 +332,61 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.player.set_property("audio-sink", sinkbin)
 
         self.emit('player-ready', True)
+
+        # split the stream out for saving
+        # https://wiki.ubuntu.com/Novacut/GStreamer1.0#Examples
+        split = Gst.ElementFactory.make("tee")
+
+        sink_bin = Gst.Bin()
+        sink_bin.add(split)
+
+        sink_bin.add_pad(Gst.GhostPad.new("sink", split.get_static_pad("sink")))
+
+        self.player.set_property("audio-sink", sink_bin) # comment out this line to switch back to not saving the stream
+
+        qrep = Gst.ElementFactory.make("queue")
+        rep = Gst.ElementFactory.make("autoaudiosink")
+        sink_bin.add(qrep)
+        sink_bin.add(rep)
+        split.link(qrep)
+        qrep.link(rep)
+
+        # http://gstreamer.freedesktop.org/documentation/plugins.html
+        qfs = Gst.ElementFactory.make("queue")
+        enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        # constant bit rate
+        enc.set_property("cbr", True) # constant bitrate
+        enc.set_property("target",1) # target bitrate, 0 to target quality and then bitrate does not mater
+        enc.set_property("bitrate",128) # incoming stream is 64 bit AAC+, so we upconvert to 128 to get every bit out of ut. Could user 192 or even 224 for pandora one subsribers
+        # for VBR use the following:
+        #enc.set_property("cbr",False)
+        #enc.set_property("target",0) # 0 to target quality and then bitrate does not mater
+        #enc.set_property("quality",1) # 0 to 10. 0 is the best
+        enc.set_property("encoding-engine-quality",2) # 2 high quality. 0 fast, 1 standard
+
+        # need the tagger to start the stream with an ID3 tag frame for later mutagen consumption
+        self.tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+
+        # for ogg vorbis do
+        #enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        #tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+        #mux = Gst.ElementFactory.make("oggmux")
+        self.fs = Gst.ElementFactory.make("filesink")
+        self.fs.set_property("location", "test.file") #dummy location
+        self.fs.set_property("async",False)
+
+        sink_bin.add(qfs)
+        sink_bin.add(enc)
+        sink_bin.add(self.tag)
+        #sink_bin.add(mux)
+        sink_bin.add(self.fs)
+        split.link(qfs)
+        qfs.link(enc)
+        enc.link(self.tag)
+        # for ogg vorbis extend the chain
+        #self.tag.link(mux)
+        #mux.link(self.fs)
+        self.tag.link(self.fs)
 
         bus = self.player.get_bus()
         bus.add_signal_watch()
@@ -748,6 +806,21 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.player.set_property('connection-speed', int(song.bitrate))
         self.player.set_property("uri", audioUrl)
         self._set_player_state(PseudoGst.BUFFERING)
+        # split save to a file
+        #self.buffer_percent = 100
+        # set output file
+
+        save_dir = os.environ.get("PITHOSFLY_SAVE_DIR", "pithos_dl")
+
+        self.outfolder="%s/%s" % (save_dir, self.current_station.name)
+        if not os.path.exists(self.outfolder):
+            os.makedirs(self.outfolder)
+        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
+        # tags are set through mutagen but could use the following to set tags through gstreamer
+        # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
+        #self.tag.gst_tag_setter_add_tag_values("artist")
+        #self.tag.gst_tag_setter_add_tag_values("title")
+
         self.playcount += 1
 
         self.current_song.start_time = time.time()
@@ -762,6 +835,8 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     @GtkTemplate.Callback
     def next_song(self, *ignore):
+        if self.fs.get_property("location") is not None and os.path.isfile(self.fs.get_property("location")):
+            os.remove(self.fs.get_property("location"))    # remove the partial file
         if self.current_song_index is not None:
             self.start_song(self.current_song_index + 1)
 
@@ -814,6 +889,8 @@ class PithosWindow(Gtk.ApplicationWindow):
 
 
     def stop(self):
+        if self.fs.get_property("location") is not None and os.path.isfile(self.fs.get_property("location")):
+            os.remove(self.fs.get_property("location"))    # remove the partial file on station switch, app exit etc which causes the song to "stop" midstream
         prev = self.current_song
         if prev and prev.start_time:
             prev.finished = True
@@ -1077,6 +1154,25 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def on_gst_eos(self, bus, message):
         logging.info("EOS")
+        # move the partial into completed
+        if self.current_song.rating == RATE_LOVE:
+            newlocation = "%s/%s - %s (loved).mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
+        else:
+            newlocation = "%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
+        os.rename(self.fs.get_property("location"),newlocation)
+        # add mp3 tags
+        f=ID3(newlocation)
+        f.add(TIT2(encoding=3, text=self.current_song.title))
+        f.add(TALB(encoding=3, text=self.current_song.album))
+        f.add(TPE1(encoding=3, text=self.current_song.artist))
+        f.add(TCON(encoding=3, text=self.current_station.name))
+        if self.current_song.art_pixbuf is not None:    # add the cover art
+            # convert pure pixelmap to jpeg through file export because python Gtk is missing buffered function implementations
+            self.current_song.art_pixbuf.savev(newlocation+".jpg", "jpeg", ["quality"], ["100"])
+            # get the file contents into the mp3 id2 tag v2.3/2.4 cover art
+            f.add(APIC(3,u"image/jpg",3,u"Cover art",open(newlocation+".jpg", 'rb').read())) # first 3 = mutagen.id3.Encoding.UTF8,  second 3 =mutagen.id3.PictureType.COVER_FRONT
+            os.remove(newlocation+".jpg")
+        f.save()
         self.next_song()
 
     def on_gst_plugin_installed(self, result, userdata):
