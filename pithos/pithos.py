@@ -263,6 +263,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.settings.connect('changed::proxy', self.set_proxy)
         self.settings.connect('changed::control-proxy', self.set_proxy)
         self.settings.connect('changed::control-proxy-pac', self.set_proxy)
+        self.settings.connect('changed::save-to', self.save_dir)
 
         self.prefs_dlg = PreferencesPithosDialog.PreferencesPithosDialog(transient_for=self)
         self.prefs_dlg.connect_after('response', self.on_prefs_response)
@@ -278,6 +279,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.pandora = make_pandora(test_mode)
         self.set_proxy(reconnect=False)
         self.set_audio_quality()
+        self.save_dir()
+        
         SecretService.unlock_keyring(self.on_keyring_unlocked)
 
     def on_keyring_unlocked(self, error):
@@ -731,7 +734,7 @@ class PithosWindow(Gtk.ApplicationWindow):
                 self.prefs_dlg.explicit_content_filter_checkbutton.set_inconsistent(False)
                 self.prefs_dlg.explicit_content_filter_checkbutton.set_active(self.filter_state)
                 if pin_protected:
-                    self.prefs_dlg.explicit_content_filter_checkbutton.set_label(_('Explicit Content Filter - PIN Protected'))
+                    self.prefs_dlg.explicit_content_filter_checkbutton.set_label(('Explicit Content Filter - PIN Protected'))
                 else:
                     self.prefs_dlg.explicit_content_filter_checkbutton.set_sensitive(True)
 
@@ -765,7 +768,11 @@ class PithosWindow(Gtk.ApplicationWindow):
             # User has no stations, open dialog
             self.show_stations()
 
+    def save_dir(self, *ignore):
+        return self.settings['save-to']
     @property
+    
+
     def current_song(self):
         if self.current_song_index is not None:
             return self.songs_model[self.current_song_index][0]
@@ -810,12 +817,12 @@ class PithosWindow(Gtk.ApplicationWindow):
         #self.buffer_percent = 100
         # set output file
 
-        save_dir = os.environ.get("PITHOSFLY_SAVE_DIR", "pithos_dl")
-
-        self.outfolder="%s/%s" % (save_dir, self.current_station.name)
+    
+        
+        self.outfolder="%s/%s" % (self.save_dir(), self.current_song.artist)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
-        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title)))
+        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder, self.current_song.album))
         # tags are set through mutagen but could use the following to set tags through gstreamer
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
@@ -824,9 +831,9 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.playcount += 1
 
         self.current_song.start_time = time.time()
-        self.songs_treeview.scroll_to_cell(song_index, use_align=True, row_align = 1.0)
-        self.songs_treeview.set_cursor(song_index, None, 0)
-        self.set_title("%s by %s - Pithos" % (song.title, song.artist))
+        self.songs_treeview.scroll_to_cell(self.current_song_index, use_align=True, row_align = 1.0)
+        self.songs_treeview.set_cursor(self.current_song_index, None, 0)
+        self.set_title("%s by %s - Pithos" % (self.current_song.title, self.current_song.artist))
 
         self.update_song_row()
 

@@ -63,6 +63,11 @@
       <summary>Quality of songs</summary>
     </key>
 
+    <key type="s" name="save-to">
+      <default>""</default>
+      <summary>Save Directory</summary>
+    </key>
+
     <child name="mediakeys" schema="io.github.Pithos.plugin-enabled"/>
     <child name="screensaver-pause" schema="io.github.Pithos.plugin-enabled"/>
     <child name="mpris" schema="io.github.Pithos.plugin-enabled"/>

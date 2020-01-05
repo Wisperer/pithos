@@ -110,6 +110,7 @@ class PreferencesPithosDialog(Gtk.Dialog):
     control_proxy_entry = GtkTemplate.Child()
     control_proxy_pac_entry = GtkTemplate.Child()
     explicit_content_filter_checkbutton = GtkTemplate.Child()
+    save_to_entry = GtkTemplate.Child()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, use_header_bar=1, **kwargs)
@@ -127,6 +128,7 @@ class PreferencesPithosDialog(Gtk.Dialog):
             'control-proxy': (self.control_proxy_entry, 'text'),
             'control-proxy-pac': (self.control_proxy_pac_entry, 'text'),
             'audio-quality': (self.audio_quality_combo, 'active-id'),
+            'save-to': (self.save_to_entry, 'text')
         }
 
         for key, val in settings_mapping.items():

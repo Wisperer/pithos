@@ -57,7 +57,7 @@ def maybe_migrate_settings():
         'unsafe_permissions',
         'x_pos',
         'y_pos',
-        'audio_format' # Pre 0.3.18
+        'audio_format'  # Pre 0.3.18
     )
 
     settings = Gio.Settings.new('io.github.Pithos')
