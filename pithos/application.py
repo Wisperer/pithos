@@ -123,7 +123,7 @@ class PithosApplication(Gtk.Application):
                 journal.LOG_ALERT: 'ALERT',
             }
 
-            got_logs = False            
+            got_logs = False
 
             for entry in reader:
                 try:

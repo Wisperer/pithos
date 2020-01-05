@@ -265,7 +265,7 @@
                           </packing>
                         </child>
                         <child>
-                          <object class="GtkEntry" id="save_to_entry">
+                          <object class="GtkEntry" id="save_at_entry">
                             <property name="visible">True</property>
                             <property name="can_focus">True</property>                          
                           </object>
@@ -275,7 +275,7 @@
                           </packing>
                         </child>
                         <child>
-                          <object class="GtkLabel" id="label_save_to">
+                          <object class="GtkLabel" id="label_save_at">
                             <property name="visible">True</property>
                             <property name="can_focus">False</property>
                             <property name="label" translatable="yes">Save To Location</property>

@@ -219,7 +219,8 @@ def open_browser(url, parent=None, timestamp=0):
     except GLib.Error as e:
         logging.warning('Failed to open URL: {}'.format(e.message))
 
+
 if hasattr(Gtk.Menu, 'popup_at_pointer'):
     popup_at_pointer = Gtk.Menu.popup_at_pointer
 else:
-    popup_at_pointer = lambda menu, event: menu.popup(None, None, None, None, event.button, event.time)
+    def popup_at_pointer(menu, event): return menu.popup(None, None, None, None, event.button, event.time)

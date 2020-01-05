@@ -63,7 +63,7 @@
       <summary>Quality of songs</summary>
     </key>
 
-    <key type="s" name="save-to">
+    <key name="save-at" type="s">
       <default>""</default>
       <summary>Save Directory</summary>
     </key>

@@ -56,7 +56,7 @@ def get_system_tray_supported(screen):
     display = screen.get_display()
     xdisplay = ctypes.c_void_p(hash(display.get_xdisplay()))
     xatom = ctypes.c_int(GdkX11.x11_get_xatom_by_name_for_display(display,
-                         '_NET_SYSTEM_TRAY_S{}'.format(screen_num)))
+                                                                  '_NET_SYSTEM_TRAY_S{}'.format(screen_num)))
 
     display.grab()
     ret = bool(xlib.XGetSelectionOwner(xdisplay, xatom))

@@ -263,7 +263,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.settings.connect('changed::proxy', self.set_proxy)
         self.settings.connect('changed::control-proxy', self.set_proxy)
         self.settings.connect('changed::control-proxy-pac', self.set_proxy)
-        self.settings.connect('changed::save-to', self.save_dir)
+        self.settings.connect('changed::save-at', self.save_dir)
 
         self.prefs_dlg = PreferencesPithosDialog.PreferencesPithosDialog(transient_for=self)
         self.prefs_dlg.connect_after('response', self.on_prefs_response)
@@ -283,12 +283,15 @@ class PithosWindow(Gtk.ApplicationWindow):
         
         SecretService.unlock_keyring(self.on_keyring_unlocked)
 
+    def save_dir(self, *ignore):
+        return self.settings['save-at']
+
     def on_keyring_unlocked(self, error):
         if error:
             logging.error('You need to install a service such as gnome-keyring. Error: {}'.format(error))
             self.fatal_error_dialog(
                 error.message,
-                _('You need to install a service such as gnome-keyring.'),
+                ('You need to install a service such as gnome-keyring.'),
             )
 
         else:
@@ -719,7 +722,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def sync_explicit_content_filter_setting(self, *ignore):
         #reset checkbox to default state
-        self.prefs_dlg.explicit_content_filter_checkbutton.set_label(_('Explicit Content Filter'))
+        self.prefs_dlg.explicit_content_filter_checkbutton.set_label(('Explicit Content Filter'))
         self.prefs_dlg.explicit_content_filter_checkbutton.set_sensitive(False)
         self.prefs_dlg.explicit_content_filter_checkbutton.set_active(False)
         self.prefs_dlg.explicit_content_filter_checkbutton.set_inconsistent(True)
@@ -768,8 +771,7 @@ class PithosWindow(Gtk.ApplicationWindow):
             # User has no stations, open dialog
             self.show_stations()
 
-    def save_dir(self, *ignore):
-        return self.settings['save-to']
+    
     @property
     
 
@@ -818,11 +820,12 @@ class PithosWindow(Gtk.ApplicationWindow):
         # set output file
 
     
-        
-        self.outfolder="%s/%s" % (self.save_dir(), self.current_song.artist)
+        self.outfolder = "%s/%s/%s/" % (self.save_dir(), self.current_song.artist, self.current_song.album)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
-        self.fs.set_property("location", "%s/%s - %s.partial" % (self.outfolder, self.current_song.album))
+        self.fs.set_property("location", f"{self.outfolder}")
+        logging.info(f"{self.outfolder}")
+        logging.info(f"{self.current_song.title}")
         # tags are set through mutagen but could use the following to set tags through gstreamer
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
         #self.tag.gst_tag_setter_add_tag_values("artist")
@@ -1096,21 +1099,21 @@ class PithosWindow(Gtk.ApplicationWindow):
                 self.station_changed(station)
             dialog.destroy()
 
-        sub_title = _('Pandora does not permit multiple stations with the same seed.')
+        sub_title = ('Pandora does not permit multiple stations with the same seed.')
 
         if music_type == 'song':
-            seed = _('Song Seed:')
+            seed = ('Song Seed:')
         elif music_type == 'artist':
-            seed = _('Artist Seed:')
+            seed = ('Artist Seed:')
         else:
-            seed = _('Genre Seed:')
+            seed = ('Genre Seed:')
 
         if station is self.current_station:
             button_type = Gtk.ButtonsType.OK
-            message = _('{0}\n"{1}", the Station you are currently listening to already contains the {2} {3}.')
+            message = ('{0}\n"{1}", the Station you are currently listening to already contains the {2} {3}.')
         else:
             button_type = Gtk.ButtonsType.YES_NO
-            message = _('{0}\nYour Station "{1}" already contains the {2} {3}.\nWould you like to listen to it now?')
+            message = ('{0}\nYour Station "{1}" already contains the {2} {3}.\nWould you like to listen to it now?')
 
         message = message.format(sub_title, station.name, seed, description)
 
@@ -1119,7 +1122,7 @@ class PithosWindow(Gtk.ApplicationWindow):
             flags=Gtk.DialogFlags.MODAL,
             type=Gtk.MessageType.WARNING,
             buttons=button_type,
-            text=_('A New Station could not be created'),
+            text=('A New Station could not be created'),
             secondary_text=message,
         )
 
@@ -1162,11 +1165,14 @@ class PithosWindow(Gtk.ApplicationWindow):
     def on_gst_eos(self, bus, message):
         logging.info("EOS")
         # move the partial into completed
+         
         if self.current_song.rating == RATE_LOVE:
-            newlocation = "%s/%s - %s (loved).mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
+            newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
         else:
-            newlocation = "%s/%s - %s.mp3" % (self.outfolder,clean_name(self.current_song.artist),clean_name(self.current_song.title))
-        os.rename(self.fs.get_property("location"),newlocation)
+            newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
+            logging.warning(f"{self.outfolder}")
+        os.rename(self.fs.get_property("location"), newlocation)        
+        logging.warning(f"{newlocation}")
         # add mp3 tags
         f=ID3(newlocation)
         f.add(TIT2(encoding=3, text=self.current_song.title))
@@ -1184,11 +1190,11 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def on_gst_plugin_installed(self, result, userdata):
         if result == GstPbutils.InstallPluginsReturn.SUCCESS:
-            self.fatal_error_dialog(_("Codec installation successful"),
-                        submsg=_("The required codec was installed, please restart Pithos."))
+            self.fatal_error_dialog(("Codec installation successful"),
+                        submsg=("The required codec was installed, please restart Pithos."))
         else:
-            self.error_dialog(_("Codec installation failed"), None,
-                        submsg=_("The required codec failed to install. Either manually install it or try another quality setting."))
+            self.error_dialog(("Codec installation failed"), None,
+                        submsg=("The required codec failed to install. Either manually install it or try another quality setting."))
 
     def on_gst_element(self, bus, message):
         if GstPbutils.is_missing_plugin_message(message):
@@ -1196,8 +1202,8 @@ class PithosWindow(Gtk.ApplicationWindow):
                 details = GstPbutils.missing_plugin_message_get_installer_detail(message)
                 GstPbutils.install_plugins_async([details,], None, self.on_gst_plugin_installed, None)
             else:
-                self.error_dialog(_("Missing codec"), None,
-                        submsg=_("GStreamer is missing a plugin and it could not be automatically installed. Either manually install it or try another quality setting."))
+                self.error_dialog(("Missing codec"), None,
+                        submsg=("GStreamer is missing a plugin and it could not be automatically installed. Either manually install it or try another quality setting."))
 
     def on_gst_error(self, bus, message):
         err, debug = message.parse_error()
