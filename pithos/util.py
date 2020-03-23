@@ -224,3 +224,12 @@ if hasattr(Gtk.Menu, 'popup_at_pointer'):
     popup_at_pointer = Gtk.Menu.popup_at_pointer
 else:
     def popup_at_pointer(menu, event): return menu.popup(None, None, None, None, event.button, event.time)
+
+_is_flatpak = None
+def is_flatpak() -> bool:
+    global _is_flatpak
+
+    if _is_flatpak is None:
+        _is_flatpak = os.path.exists('/.flatpak-info')
+
+    return _is_flatpak
