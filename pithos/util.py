@@ -14,6 +14,7 @@
 
 
 import logging
+import os
 from urllib.parse import splittype, splituser, splitpasswd
 
 import gi
