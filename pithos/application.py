@@ -67,10 +67,12 @@ class PithosApplication(Gtk.Application):
         action = Gio.SimpleAction.new("stations", None)
         action.connect("activate", self.stations_cb)
         self.add_action(action)
+        self.set_accels_for_action('app.stations', ['<Primary>s'])
 
         action = Gio.SimpleAction.new("preferences", None)
         action.connect("activate", self.prefs_cb)
         self.add_action(action)
+        self.set_accels_for_action('app.preferences', ['<Primary>p'])
 
         action = Gio.SimpleAction.new("help", None)
         action.connect("activate", self.help_cb)
