@@ -28,7 +28,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from enum import Enum
-from mutagen.id3 import ID3,TRCK,TIT2,TALB,TPE1,APIC,TCON
+from mutagen.id3 import ID3, TRCK, TIT2, TALB, TPE1, APIC, TCON
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -48,6 +48,7 @@ from .pandora.data import *
 from .plugin import load_plugins
 from .util import parse_proxy, open_browser, SecretService, popup_at_pointer, is_flatpak
 from .migrate_settings import maybe_migrate_settings
+import shutil
 
 try:
     import pacparser
@@ -55,7 +56,7 @@ except ImportError:
     pacparser = None
 
 ALBUM_ART_SIZE = 96     # size that's displayed
-ALBUM_ART_FULL_SIZE=300 # size that's stored in memory and saved to mp3
+ALBUM_ART_FULL_SIZE = 300 # size that's stored in memory and saved to mp3
 TEXT_X_PADDING = 12
 
 FALLBACK_BLACK = Gdk.RGBA(red=0.0, green=0.0, blue=0.0, alpha=1.0)
@@ -72,6 +73,7 @@ style="fill:{bg}" /></g></svg>
 BACKGROUND_SVG = '''
 <svg><rect y="0" x="0" height="{px}" width="{px}" style="fill:{fg}" /></svg>
 '''
+
 
 class PseudoGst(Enum):
     """Create aliases to Gst.State so that we can add our own BUFFERING Pseudo state"""
@@ -107,16 +109,19 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
 
     __gproperties__ = {
         'icon': (str, 'icon', 'icon', '', GObject.ParamFlags.READWRITE),
-        'pixbuf': (GdkPixbuf.Pixbuf, 'pixmap', 'pixmap',  GObject.ParamFlags.READWRITE)
+        'pixbuf': (GdkPixbuf.Pixbuf, 'pixmap', 'pixmap', GObject.ParamFlags.READWRITE)
     }
 
     def do_set_property(self, pspec, value):
         setattr(self, pspec.name, value)
+
     def do_get_property(self, pspec):
         return getattr(self, pspec.name)
+
     def do_render(self, ctx, widget, background_area, cell_area, flags):
         if self.pixbuf is not None:
-            gui_pixbuf=self.pixbuf.scale_simple(ALBUM_ART_SIZE,ALBUM_ART_SIZE,GdkPixbuf.InterpType.BILINEAR)# scaled down pixbuf
+            gui_pixbuf = self.pixbuf.scale_simple(ALBUM_ART_SIZE, ALBUM_ART_SIZE,
+                                                  GdkPixbuf.InterpType.BILINEAR)# scaled down pixbuf
             Gdk.cairo_set_source_pixbuf(ctx, gui_pixbuf, cell_area.x, cell_area.y)
             ctx.paint()
         else:
@@ -213,8 +218,8 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
 def clean_name(s):
     # for windows you can do this:
     #valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    #return ''.join(c if c in valid_chars else '-' for c in s.strip())
-    return s.strip().replace("/","-")
+    # return ''.join(c if c in valid_chars else '-' for c in s.strip())
+    return s.strip().replace("/", "-")
 
 
 @GtkTemplate(ui='/io/github/Pithos/ui/PithosWindow.ui')
@@ -280,7 +285,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.set_proxy(reconnect=False)
         self.set_audio_quality()
         self.save_dir()
-        
+
         SecretService.unlock_keyring(self.on_keyring_unlocked)
 
     def save_dir(self, *ignore):
@@ -298,12 +303,11 @@ class PithosWindow(Gtk.ApplicationWindow):
             maybe_migrate_settings()
             self.pandora_connect()
 
-
     def init_core(self):
         #                                Song object            display text  icon  album art
-        self.songs_model = Gtk.ListStore(GObject.TYPE_PYOBJECT, str,          str,  GdkPixbuf.Pixbuf)
+        self.songs_model = Gtk.ListStore(GObject.TYPE_PYOBJECT, str, str, GdkPixbuf.Pixbuf)
         #                                   Station object         station name  index
-        self.stations_model = Gtk.ListStore(GObject.TYPE_PYOBJECT, str,          int)
+        self.stations_model = Gtk.ListStore(GObject.TYPE_PYOBJECT, str, int)
 
         Gst.init(None)
         self._query_duration = Gst.Query.new_duration(Gst.Format.TIME)
@@ -362,36 +366,37 @@ class PithosWindow(Gtk.ApplicationWindow):
         enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
         # constant bit rate
         enc.set_property("cbr", True) # constant bitrate
-        enc.set_property("target",1) # target bitrate, 0 to target quality and then bitrate does not mater
-        enc.set_property("bitrate",128) # incoming stream is 64 bit AAC+, so we upconvert to 128 to get every bit out of ut. Could user 192 or even 224 for pandora one subsribers
+        enc.set_property("target", 1) # target bitrate, 0 to target quality and then bitrate does not mater
+        # incoming stream is 64 bit AAC+, so we upconvert to 128 to get every bit out of ut. Could user 192 or even 224 for pandora one subsribers
+        enc.set_property("bitrate", 128)
         # for VBR use the following:
-        #enc.set_property("cbr",False)
-        #enc.set_property("target",0) # 0 to target quality and then bitrate does not mater
-        #enc.set_property("quality",1) # 0 to 10. 0 is the best
-        enc.set_property("encoding-engine-quality",2) # 2 high quality. 0 fast, 1 standard
+        # enc.set_property("cbr",False)
+        # enc.set_property("target",0) # 0 to target quality and then bitrate does not mater
+        # enc.set_property("quality",1) # 0 to 10. 0 is the best
+        enc.set_property("encoding-engine-quality", 2) # 2 high quality. 0 fast, 1 standard
 
         # need the tagger to start the stream with an ID3 tag frame for later mutagen consumption
-        self.tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+        self.tag = Gst.ElementFactory.make("id3v2mux")  # vorbistag
 
         # for ogg vorbis do
-        #enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
-        #tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
+        # enc = Gst.ElementFactory.make("lamemp3enc") # vorbisenc
+        # tag = Gst.ElementFactory.make("id3v2mux") #vorbistag
         #mux = Gst.ElementFactory.make("oggmux")
         self.fs = Gst.ElementFactory.make("filesink")
-        self.fs.set_property("location", "test.file") #dummy location
-        self.fs.set_property("async",False)
+        self.fs.set_property("location", "test.file")  # dummy location
+        self.fs.set_property("async", False)
 
         sink_bin.add(qfs)
         sink_bin.add(enc)
         sink_bin.add(self.tag)
-        #sink_bin.add(mux)
+        # sink_bin.add(mux)
         sink_bin.add(self.fs)
         split.link(qfs)
         qfs.link(enc)
         enc.link(self.tag)
         # for ogg vorbis extend the chain
-        #self.tag.link(mux)
-        #mux.link(self.fs)
+        # self.tag.link(mux)
+        # mux.link(self.fs)
         self.tag.link(self.fs)
 
         bus = self.player.get_bus()
@@ -456,7 +461,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
         self.songs_treeview.set_model(self.songs_model)
 
-        title_col   = Gtk.TreeViewColumn()
+        title_col = Gtk.TreeViewColumn()
 
         render_cover_art = CellRendererAlbumArt()
         title_col.pack_start(render_cover_art, False)
@@ -541,11 +546,12 @@ class PithosWindow(Gtk.ApplicationWindow):
         if context and message:
             self.statusbar.push(self.statusbar.get_context_id(context), message)
 
-        if isinstance(fn,str):
+        if isinstance(fn, str):
             fn = getattr(self.pandora, fn)
 
         def cb(v):
-            if context: self.statusbar.pop(self.statusbar.get_context_id(context))
+            if context:
+                self.statusbar.pop(self.statusbar.get_context_id(context))
             if callback:
                 if user_data:
                     callback(v, user_data)
@@ -603,7 +609,7 @@ class PithosWindow(Gtk.ApplicationWindow):
                     self.stop()
                     self.current_song_index = None
                     self.songs_model.clear()
-                    self.get_playlist(start = True)
+                    self.get_playlist(start=True)
 
             if self.filter_state is not None and self.filter_state != current_checkbox_state:
                 self.worker_run(set_content_filter, (current_checkbox_state, ), get_new_playlist)
@@ -649,7 +655,8 @@ class PithosWindow(Gtk.ApplicationWindow):
             logging.warning("Disabled proxy auto-config support because python-pacparser module was not found.")
 
         if control_proxy:
-            control_opener = pandora.Pandora.build_opener(urllib.request.ProxyHandler({'http': control_proxy, 'https': control_proxy}))
+            control_opener = pandora.Pandora.build_opener(
+                urllib.request.ProxyHandler({'http': control_proxy, 'https': control_proxy}))
 
         self.pandora.set_url_opener(control_opener)
 
@@ -724,7 +731,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self._pandora_connect_real("Logging in...", None, email, password)
 
     def sync_explicit_content_filter_setting(self, *ignore):
-        #reset checkbox to default state
+        # reset checkbox to default state
         self.prefs_dlg.explicit_content_filter_checkbutton.set_label(('Explicit Content Filter'))
         self.prefs_dlg.explicit_content_filter_checkbutton.set_sensitive(False)
         self.prefs_dlg.explicit_content_filter_checkbutton.set_active(False)
@@ -740,7 +747,8 @@ class PithosWindow(Gtk.ApplicationWindow):
                 self.prefs_dlg.explicit_content_filter_checkbutton.set_inconsistent(False)
                 self.prefs_dlg.explicit_content_filter_checkbutton.set_active(self.filter_state)
                 if pin_protected:
-                    self.prefs_dlg.explicit_content_filter_checkbutton.set_label(('Explicit Content Filter - PIN Protected'))
+                    self.prefs_dlg.explicit_content_filter_checkbutton.set_label(
+                        ('Explicit Content Filter - PIN Protected'))
                 else:
                     self.prefs_dlg.explicit_content_filter_checkbutton.set_sensitive(True)
 
@@ -762,22 +770,19 @@ class PithosWindow(Gtk.ApplicationWindow):
             else:
                 self.stations_model.append((s, s.name, i))
             if s.id == self.current_station_id:
-                logging.info("Restoring saved station: id = %s"%(s.id))
+                logging.info("Restoring saved station: id = %s" % (s.id))
                 selected = s
         if not selected and len(self.stations_model):
-            selected=self.stations_model[0][0]
+            selected = self.stations_model[0][0]
         if selected:
-            self.station_changed(selected, reconnecting = self.have_stations)
+            self.station_changed(selected, reconnecting=self.have_stations)
             self.have_stations = True
             self.emit('stations-processed', self.pandora.stations)
         else:
             # User has no stations, open dialog
             self.show_stations()
 
-    
     @property
-    
-
     def current_song(self):
         if self.current_song_index is not None:
             return self.songs_model[self.current_song_index][0]
@@ -786,7 +791,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         songs_remaining = len(self.songs_model) - song_index
         if songs_remaining <= 0:
             # We don't have this song yet. Get a new playlist.
-            return self.get_playlist(start = True)
+            return self.get_playlist(start=True)
         elif songs_remaining == 1:
             # Preload next playlist so there's no delay
             self.get_playlist()
@@ -807,7 +812,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         if self.current_song.tired or self.current_song.rating == RATE_BAN:
             return self.next_song()
 
-        logging.info("Starting song: index = %i"%(song_index))
+        logging.info("Starting song: index = %i" % (song_index))
         song = self.current_song
         audioUrl = song.audioUrl
         os.environ['PULSE_PROP_media.title'] = song.title
@@ -822,7 +827,6 @@ class PithosWindow(Gtk.ApplicationWindow):
         #self.buffer_percent = 100
         # set output file
 
-    
         self.outfolder = "%s/%s/%s/" % (self.save_dir(), self.current_song.artist, self.current_song.album)
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
@@ -831,13 +835,13 @@ class PithosWindow(Gtk.ApplicationWindow):
         logging.info(f"{self.current_song.title}")
         # tags are set through mutagen but could use the following to set tags through gstreamer
         # http://www.freedesktop.org/software/gstreamer-sdk/data/docs/2012.5/gstreamer-0.10/GstTagSetter.html
-        #self.tag.gst_tag_setter_add_tag_values("artist")
-        #self.tag.gst_tag_setter_add_tag_values("title")
+        # self.tag.gst_tag_setter_add_tag_values("artist")
+        # self.tag.gst_tag_setter_add_tag_values("title")
 
         self.playcount += 1
 
         self.current_song.start_time = time.time()
-        self.songs_treeview.scroll_to_cell(self.current_song_index, use_align=True, row_align = 1.0)
+        self.songs_treeview.scroll_to_cell(self.current_song_index, use_align=True, row_align=1.0)
         self.songs_treeview.set_cursor(self.current_song_index, None, 0)
         self.set_title("%s by %s - Pithos" % (self.current_song.title, self.current_song.artist))
 
@@ -900,10 +904,10 @@ class PithosWindow(Gtk.ApplicationWindow):
             self.playpause_image.set_from_icon_name('media-playback-start-symbolic', Gtk.IconSize.SMALL_TOOLBAR)
             self.emit('play-state-changed', False)
 
-
     def stop(self):
         if self.fs.get_property("location") is not None and os.path.isfile(self.fs.get_property("location")):
-            os.remove(self.fs.get_property("location"))    # remove the partial file on station switch, app exit etc which causes the song to "stop" midstream
+            # remove the partial file on station switch, app exit etc which causes the song to "stop" midstream
+            os.remove(self.fs.get_property("location"))
         prev = self.current_song
         if prev and prev.start_time:
             prev.finished = True
@@ -932,16 +936,17 @@ class PithosWindow(Gtk.ApplicationWindow):
         else:
             self.user_play()
 
-    def get_playlist(self, start = False):
+    def get_playlist(self, start=False):
         if self.playlist_update_timer_id:
             GLib.source_remove(self.playlist_update_timer_id)
         self.playlist_update_timer_id = 0
         songs_left_to_process = 0
         song_count = 0
         self.start_new_playlist = self.start_new_playlist or start
-        if self.waiting_for_playlist: return
+        if self.waiting_for_playlist:
+            return
 
-        if self.gstreamer_errorcount_1 >= self.playcount and self.gstreamer_errorcount_2 >=1:
+        if self.gstreamer_errorcount_1 >= self.playcount and self.gstreamer_errorcount_2 >= 1:
             logging.warning("Too many gstreamer errors. Not retrying")
             self.waiting_for_playlist = 1
             self.error_dialog(self.gstreamer_error, self.get_playlist)
@@ -978,10 +983,11 @@ class PithosWindow(Gtk.ApplicationWindow):
             nonlocal songs_left_to_process
             pixbuf, file_url, song, index = t
             songs_left_to_process -= 1
-            if index<len(self.songs_model) and self.songs_model[index][0] is song: # in case the playlist has been reset
-                logging.info("Downloaded album art for %i"%song.index)
+            # in case the playlist has been reset
+            if index < len(self.songs_model) and self.songs_model[index][0] is song:
+                logging.info("Downloaded album art for %i" % song.index)
                 song.art_pixbuf = pixbuf
-                self.songs_model[index][3]=pixbuf
+                self.songs_model[index][3] = pixbuf
                 self.update_song_row(song)
                 if file_url:
                     song.artUrl = file_url
@@ -1067,7 +1073,8 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.quit()
 
     def station_changed(self, station, reconnecting=False):
-        if station is self.current_station: return
+        if station is self.current_station:
+            return
         self.waiting_for_playlist = False
         if not reconnecting:
             self.stop()
@@ -1078,7 +1085,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         self.current_station = station
         self.settings.set_string('last-station-id', self.current_station_id)
         if not reconnecting:
-            self.get_playlist(start = True)
+            self.get_playlist(start=True)
         self.stations_label.set_text(station.name)
         self.stations_popover.select_station(station)
         self.emit('station-changed', station)
@@ -1133,16 +1140,16 @@ class PithosWindow(Gtk.ApplicationWindow):
         dialog.show()
 
     def query_position(self):
-      pos_stat = self.player.query(self._query_position)
-      if pos_stat:
-        _, position = self._query_position.parse_position()
-        return position
+        pos_stat = self.player.query(self._query_position)
+        if pos_stat:
+            _, position = self._query_position.parse_position()
+            return position
 
     def query_duration(self):
-      dur_stat = self.player.query(self._query_duration)
-      if dur_stat:
-        _, duration = self._query_duration.parse_duration()
-        return duration
+        dur_stat = self.player.query(self._query_duration)
+        if dur_stat:
+            _, duration = self._query_duration.parse_duration()
+            return duration
 
     def query_buffer(self):
         buffer_stat = self.player.query(self._query_buffer)
@@ -1168,51 +1175,52 @@ class PithosWindow(Gtk.ApplicationWindow):
     def on_gst_eos(self, bus, message):
         logging.info("EOS")
         # move the partial into completed
-         
+
         if self.current_song.rating == RATE_LOVE:
             newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
         else:
             newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
             logging.warning(f"{self.outfolder}")
-        os.rename(self.fs.get_property("location"), newlocation)        
+        shutil.move(self.fs.get_property("location"), newlocation)
         logging.warning(f"{newlocation}")
         # add mp3 tags
-        f=ID3(newlocation)
+        f = ID3(newlocation)
         f.add(TIT2(encoding=3, text=self.current_song.title))
         f.add(TALB(encoding=3, text=self.current_song.album))
         f.add(TPE1(encoding=3, text=self.current_song.artist))
         f.add(TCON(encoding=3, text=self.current_station.name))
         if self.current_song.art_pixbuf is not None:    # add the cover art
             # convert pure pixelmap to jpeg through file export because python Gtk is missing buffered function implementations
-            self.current_song.art_pixbuf.savev(newlocation+".jpg", "jpeg", ["quality"], ["100"])
+            self.current_song.art_pixbuf.savev(newlocation + ".jpg", "jpeg", ["quality"], ["100"])
             # get the file contents into the mp3 id2 tag v2.3/2.4 cover art
-            f.add(APIC(3,u"image/jpg",3,u"Cover art",open(newlocation+".jpg", 'rb').read())) # first 3 = mutagen.id3.Encoding.UTF8,  second 3 =mutagen.id3.PictureType.COVER_FRONT
-            os.remove(newlocation+".jpg")
+            # first 3 = mutagen.id3.Encoding.UTF8,  second 3 =mutagen.id3.PictureType.COVER_FRONT
+            f.add(APIC(3, u"image/jpg", 3, u"Cover art", open(newlocation + ".jpg", 'rb').read()))
+            os.remove(newlocation + ".jpg")
         f.save()
         self.next_song()
 
     def on_gst_plugin_installed(self, result, userdata):
         if result == GstPbutils.InstallPluginsReturn.SUCCESS:
             self.fatal_error_dialog(("Codec installation successful"),
-                        submsg=("The required codec was installed, please restart Pithos."))
+                                    submsg=("The required codec was installed, please restart Pithos."))
         else:
             self.error_dialog(("Codec installation failed"), None,
-                        submsg=("The required codec failed to install. Either manually install it or try another quality setting."))
+                              submsg=("The required codec failed to install. Either manually install it or try another quality setting."))
 
     def on_gst_element(self, bus, message):
         if GstPbutils.is_missing_plugin_message(message):
             if GstPbutils.install_plugins_supported():
                 details = GstPbutils.missing_plugin_message_get_installer_detail(message)
-                GstPbutils.install_plugins_async([details,], None, self.on_gst_plugin_installed, None)
+                GstPbutils.install_plugins_async([details, ], None, self.on_gst_plugin_installed, None)
             else:
                 self.error_dialog(("Missing codec"), None,
-                        submsg=("GStreamer is missing a plugin and it could not be automatically installed. Either manually install it or try another quality setting."))
+                                  submsg=("GStreamer is missing a plugin and it could not be automatically installed. Either manually install it or try another quality setting."))
 
     def on_gst_error(self, bus, message):
         err, debug = message.parse_error()
         logging.error("Gstreamer error: %s, %s, %s" % (err, debug, err.code))
         if self.current_song:
-            self.current_song.message = "Error: "+str(err)
+            self.current_song.message = "Error: " + str(err)
             self.update_song_row()
 
         self.gstreamer_error = str(err)
@@ -1233,7 +1241,8 @@ class PithosWindow(Gtk.ApplicationWindow):
                     logging.info('Not an Ad..')
                     self.current_song.is_ad = False
             else:
-                logging.warning('dur_stat is False. The assumption that duration is available once the stream-start messages feeds is bad.')
+                logging.warning(
+                    'dur_stat is False. The assumption that duration is available once the stream-start messages feeds is bad.')
 
     def on_gst_buffering(self, bus, message):
         # React to the buffer message immediately and also fire a short repeating timeout
@@ -1283,7 +1292,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def set_volume_cb(self, volume):
         # Convert to the cubic scale that the volume slider uses
-        scaled_volume = math.pow(volume, 1.0/3.0)
+        scaled_volume = math.pow(volume, 1.0 / 3.0)
         self.volume.handler_block_by_func(self.on_volume_change_event)
         self.volume.set_property("value", scaled_volume)
         self.volume.handler_unblock_by_func(self.on_volume_change_event)
@@ -1342,7 +1351,7 @@ class PithosWindow(Gtk.ApplicationWindow):
             return 'ban'
         return None
 
-    def update_song_row(self, song = None):
+    def update_song_row(self, song=None):
         if song is None:
             song = self.current_song
         if song:
@@ -1365,7 +1374,7 @@ class PithosWindow(Gtk.ApplicationWindow):
     @staticmethod
     def format_time(time_int):
         if time_int is None:
-          return None
+            return None
 
         time_int //= 1000000000
         s = time_int % 60
@@ -1375,9 +1384,9 @@ class PithosWindow(Gtk.ApplicationWindow):
         h = time_int
 
         if h:
-            return "%i:%02i:%02i"%(h,m,s)
+            return "%i:%02i:%02i" % (h, m, s)
         else:
-            return "%i:%02i"%(m,s)
+            return "%i:%02i" % (m, s)
 
     def selected_song(self):
         sel = self.songs_treeview.get_selection().get_selected()
@@ -1392,14 +1401,15 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def love_song(self, *ignore, song=None):
         song = song or self.current_song
+
         def callback(l):
             self.update_song_row(song)
             self.emit('metadata-changed', song)
         self.worker_run(song.rate, (RATE_LOVE,), callback, "Loving song...")
 
-
     def ban_song(self, *ignore, song=None):
         song = song or self.current_song
+
         def callback(l):
             self.update_song_row(song)
             self.emit('metadata-changed', song)
@@ -1409,6 +1419,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def unrate_song(self, *ignore, song=None):
         song = song or self.current_song
+
         def callback(l):
             self.update_song_row(song)
             self.emit('metadata-changed', song)
@@ -1416,6 +1427,7 @@ class PithosWindow(Gtk.ApplicationWindow):
 
     def tired_song(self, *ignore, song=None):
         song = song or self.current_song
+
         def callback(l):
             self.update_song_row(song)
             self.emit('metadata-changed', song)
@@ -1492,7 +1504,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         if pthinfo is not None:
             path, col, cellx, celly = pthinfo
             treeview.grab_focus()
-            treeview.set_cursor( path, col, 0)
+            treeview.set_cursor(path, col, 0)
 
             if event.button == 3:
                 rating = self.selected_song().rating
