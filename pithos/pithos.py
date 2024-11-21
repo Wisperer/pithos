@@ -216,10 +216,8 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
 
 
 def clean_name(s):
-    # for windows you can do this:
-    #valid_chars = "-_.() %s%s" % (string.ascii_letters, string.digits)
-    # return ''.join(c if c in valid_chars else '-' for c in s.strip())
-    return s.strip().replace("/", "-")
+    valid_chars = "-_.,()[]~!@#$^&=+ %s%s" % (string.ascii_letters, string.digits)
+    return ''.join(c if c in valid_chars else '-' for c in unicodedata.normalize('NFKD', s.strip()).encode('ASCII', 'ignore'))
 
 
 @GtkTemplate(ui='/io/github/Pithos/ui/PithosWindow.ui')
@@ -827,7 +825,7 @@ class PithosWindow(Gtk.ApplicationWindow):
         #self.buffer_percent = 100
         # set output file
 
-        self.outfolder = "%s/%s/%s/" % (self.save_dir(), self.current_song.artist, self.current_song.album)
+        self.outfolder = "%s/%s/%s/" % (self.save_dir(), clean_name(self.current_song.artist), clean_name(self.current_song.album))
         if not os.path.exists(self.outfolder):
             os.makedirs(self.outfolder)
         self.fs.set_property("location", f"{self.outfolder}")
@@ -1177,9 +1175,9 @@ class PithosWindow(Gtk.ApplicationWindow):
         # move the partial into completed
 
         if self.current_song.rating == RATE_LOVE:
-            newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
+            newlocation = "%s.mp3" % f"{self.outfolder}{clean_name(self.current_song.title)}"
         else:
-            newlocation = "%s.mp3" % f"{self.outfolder}{self.current_song.title}"
+            newlocation = "%s.mp3" % f"{self.outfolder}{clean_name(self.current_song.title)}"
             logging.warning(f"{self.outfolder}")
         shutil.move(self.fs.get_property("location"), newlocation)
         logging.warning(f"{newlocation}")
