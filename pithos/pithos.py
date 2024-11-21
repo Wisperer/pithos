@@ -27,6 +27,7 @@ import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 from enum import Enum
 from mutagen.id3 import ID3, TRCK, TIT2, TALB, TPE1, APIC, TCON
 
