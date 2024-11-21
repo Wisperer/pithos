@@ -217,7 +217,7 @@ class CellRendererAlbumArt(Gtk.CellRenderer):
 
 
 def clean_name(s):
-    valid_chars = "-_.,()[]~!@#$^&=+ %s%s" % (string.ascii_letters, string.digits)
+    valid_chars = "-_.,'()[]~!@#$^&=+ %s%s" % (string.ascii_letters, string.digits)
     return ''.join(c if c in valid_chars else '-' for c in unicodedata.normalize('NFKD', s.strip()).encode('ASCII', 'ignore').decode('ascii'))
 
 
